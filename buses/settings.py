@@ -41,7 +41,6 @@ else:
     EMAIL_TIMEOUT = 10
 
 INSTALLED_APPS = [
-    # "daphne",
     "accounts",
     "busstops",
     "django.contrib.admin",
