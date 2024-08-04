@@ -10,22 +10,22 @@ jobs:
     timeout-minutes: 5
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        cache: 'npm'
-    - run: npm install
-    - run: npm run lint
-    - run: npm test
-    - run: npm run build
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm install
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
 
-    - uses: actions/upload-artifact@v4
-      with:
-        name: dist
-        path: |
-          busstops/static
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: |
+            busstops/static
 
   test-backend:
     runs-on: ubuntu-latest
@@ -47,44 +47,44 @@ jobs:
           - 5432:5432
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Install Geospatial libraries
-      # required by GeoDjango
-      # see https://docs.djangoproject.com/en/dev/ref/contrib/gis/install/geolibs/
-      run: |
-        sudo apt-get update && sudo apt-get install binutils libproj-dev gdal-bin
+      - name: Install Geospatial libraries
+        # required by GeoDjango
+        # see https://docs.djangoproject.com/en/dev/ref/contrib/gis/install/geolibs/
+        run: |
+          sudo apt-get update && sudo apt-get install binutils libproj-dev gdal-bin
 
-    - name: Install poetry
-      run: pipx install poetry
+      - name: Install poetry # yes, before the setup-python step
+        run: pipx install poetry
 
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-        cache: 'poetry'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13-dev"
+          cache: "poetry"
 
-    - run: poetry install --with test
+      - run: poetry install --with test
 
-    - run: rm -r busstops/static
+      - run: rm -r busstops/static
 
-    - uses: actions/download-artifact@v4
-      with:
-        name: dist
-        path: busstops/static
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: busstops/static
 
-    - name: run tests
-      env:
-        SECRET_KEY: gdffesgfxc1as9rsxgv4
-        DATABASE_URL: postgis://postgres:postgres@localhost/postgres
-      run: |
-        poetry run ./manage.py collectstatic --noinput && \
-        poetry run coverage run --concurrency=multiprocessing ./manage.py test --parallel
+      - name: run tests
+        env:
+          SECRET_KEY: gdffesgfxc1as9rsxgv4
+          DATABASE_URL: postgis://postgres:postgres@localhost/postgres
+        run: |
+          poetry run ./manage.py collectstatic --noinput && \
+          poetry run coverage run --concurrency=multiprocessing ./manage.py test --parallel
 
-    - name: generate coverage report
-      run: poetry run coverage combine && poetry run coverage xml
+      - name: generate coverage report
+        run: poetry run coverage combine && poetry run coverage xml
 
-    - uses: codecov/codecov-action@v4
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        fail_ci_if_error: false
-        files: ./coverage.xml
+      - uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+          files: ./coverage.xml
