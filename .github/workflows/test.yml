@@ -3,6 +3,7 @@ name: bustimes.org
 on:
   push:
   pull_request:
+  workflow_dispatch: 
 
 jobs:
   test-frontend:
