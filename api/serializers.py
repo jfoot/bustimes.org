@@ -28,6 +28,10 @@ class VehicleSerializer(serializers.ModelSerializer):
     operator = serializers.SerializerMethodField()
     livery = serializers.SerializerMethodField()
     vehicle_type = VehicleTypeSerializer()
+    special_features = serializers.SerializerMethodField()
+
+    def get_special_features(self, obj):
+        return [feature.name for feature in obj.features.all()]
 
     def get_operator(self, obj):
         if obj.operator_id:
