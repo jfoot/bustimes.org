@@ -1,9 +1,11 @@
 import React from "react";
 
-import { Source, Layer, LayerProps } from "react-map-gl/maplibre";
+import { Layer, type LayerProps, Source } from "react-map-gl/maplibre";
 
-import { TripTime } from "./TripTimetable";
+import { getFont } from "./utils";
+
 import { ThemeContext } from "./Map";
+import type { TripTime } from "./TripTimetable";
 
 type RouteProps = {
   times: TripTime[];
@@ -11,11 +13,9 @@ type RouteProps = {
 
 export const Route = React.memo(function Route({ times }: RouteProps) {
   const theme = React.useContext(ThemeContext);
-  const darkMode = theme === "alidade_smooth_dark";
-  const font =
-    theme === "ordnance_survey"
-      ? ["Source Sans Pro Regular"]
-      : ["Stadia Regular"];
+  const darkMode = theme.endsWith("_dark") || theme.endsWith("_satellite");
+
+  const font = getFont(theme);
 
   const stopsStyle: LayerProps = {
     id: "stops",
@@ -23,7 +23,7 @@ export const Route = React.memo(function Route({ times }: RouteProps) {
     layout: {
       "symbol-sort-key": ["get", "priority"],
       "text-field": ["get", "time"],
-      "text-size": 11,
+      "text-size": 12,
       "text-font": font,
     },
     paint: {
@@ -52,14 +52,19 @@ export const Route = React.memo(function Route({ times }: RouteProps) {
 
   const lines = [];
   const lineStrings = [];
-  let prevLocation,
-    prevTime,
-    i = null;
+  let prevTime: TripTime | undefined;
+  let prevLocation: [number, number] | undefined;
+  let i = null;
 
   for (const time of times) {
+    if (time.call_condition === "notStopping") {
+      continue;
+    }
     if (time.track) {
+      // wiggly line from previous stop to this one
       lineStrings.push(time.track);
     } else if (prevTime && prevLocation && time.stop.location) {
+      // straight line from last stop with coordinates to this one
       if (prevTime.track || i === null) {
         lines.push([prevLocation, time.stop.location]);
         i = lines.length - 1;
@@ -69,7 +74,9 @@ export const Route = React.memo(function Route({ times }: RouteProps) {
     }
 
     prevTime = time;
-    prevLocation = time.stop.location;
+    if (time.stop.location) {
+      prevLocation = time.stop.location;
+    }
   }
 
   return (
@@ -85,6 +92,7 @@ export const Route = React.memo(function Route({ times }: RouteProps) {
                 type: "LineString",
                 coordinates: lineString,
               },
+              properties: null,
             };
           }),
         }}
@@ -103,6 +111,7 @@ export const Route = React.memo(function Route({ times }: RouteProps) {
                 type: "LineString",
                 coordinates: line,
               },
+              properties: null,
             };
           }),
         }}
@@ -121,7 +130,7 @@ export const Route = React.memo(function Route({ times }: RouteProps) {
                 type: "Feature",
                 geometry: {
                   type: "Point",
-                  coordinates: stop.stop.location,
+                  coordinates: stop.stop.location as [number, number],
                 },
                 properties: {
                   url: stop.stop.atco_code

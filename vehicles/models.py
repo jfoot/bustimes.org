@@ -1,4 +1,5 @@
 import datetime
+import subprocess
 import re
 import struct
 import uuid
@@ -6,21 +7,20 @@ from collections import Counter
 from math import ceil
 from urllib.parse import quote
 
-import lightningcss
-from autoslug import AutoSlugField
 from django.conf import settings
 from django.contrib.gis.db import models
-from django.core.exceptions import ValidationError
 from django.db.models import Q, UniqueConstraint
-from django.db.models.functions import TruncDate, Upper
+from django.db.models.functions import Upper
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import escape, format_html
 from simple_history.models import HistoricalRecords
-from webcolors import html5_parse_simple_color
+from webcolors import HTML5SimpleColor, html5_parse_legacy_color
 
+from busstops.fields import AutoSlugField
 from busstops.models import DataSource, Operator, Service
 from bustimes.utils import get_trip
+from .fields import ColourField, ColoursField, CSSField
 
 
 def format_reg(reg):
@@ -38,6 +38,8 @@ def format_reg(reg):
 
 
 def get_css(colours, direction=None, horizontal=False, angle=None):
+    if angle is None:
+        angle = 90
     if len(colours) == 1:
         return colours[0]
     if direction is None:
@@ -48,14 +50,9 @@ def get_css(colours, direction=None, horizontal=False, angle=None):
     if horizontal:
         background += "to top"
     elif direction < 180:
-        if angle:
-            background += f"{360-angle}deg"
-        else:
-            background += "to left"
-    elif angle:
-        background += f"{angle}deg"
+        background += f"{360 - angle}deg"
     else:
-        background += "to right"
+        background += f"{angle}deg"
     percentage = 100 / len(colours)
     for i, colour in enumerate(colours):
         if i != 0 and colour != colours[i - 1]:
@@ -67,36 +64,37 @@ def get_css(colours, direction=None, horizontal=False, angle=None):
     return background
 
 
-def get_brightness(colour):
-    return (0.299 * colour.red + 0.587 * colour.green + 0.114 * colour.blue) / 255
+def get_brightness(colour: HTML5SimpleColor) -> float:
+    """Returns a "relative luminance" between 0 and 255"""
+    return 0.299 * colour.red + 0.587 * colour.green + 0.114 * colour.blue
 
 
-def get_text_colour(colours):
-    if not colours or colours == "Other":
+def get_text_colour(colours) -> str:
+    """Returns "#fff" if the colour is dark, otherwise None"""
+    if not colours:
         return
     colours = colours.split()
-    colours = [html5_parse_simple_color(colour) for colour in colours]
+    colours = [html5_parse_legacy_color(colour) for colour in colours]
     brightnesses = [get_brightness(colour) for colour in colours]
     colours_length = len(colours)
     if colours_length > 2:
-        middle_brightness = sum(brightnesses[1:-1])
-        outer_brightness = brightnesses[0] + brightnesses[-1]
-        brightness = (middle_brightness * 2 + outer_brightness) / (
-            (colours_length - 2) * 2 + 2
-        )
-    else:
-        brightness = sum(brightnesses) / colours_length
-    if brightness < 0.5:
+        # ignore the leftmost and rightmost strips
+        brightnesses = brightnesses[1:-1]
+        colours_length -= 2
+    if (sum(brightnesses) / colours_length) <= 186:
         return "#fff"
 
 
 class VehicleTypeType(models.TextChoices):
+    SINGLE_DECKER = "", "single decker"
     DOUBLE_DECKER = "double decker", "double decker"
     MINIBUS = "minibus", "minibus"
     COACH = "coach", "coach"
-    ARTICULATED = "articulated", "articulated"
+    DOUBLE_DECK_COACH = "decker coach", "double decker coach"
+    ARTICULATED = "articulated", "bendy bus"
     TRAIN = "train", "train"
     TRAM = "tram", "tram"
+    AMPHIBIOUS = "amphibious", "amphibious"
 
 
 class FuelType(models.TextChoices):
@@ -109,9 +107,6 @@ class FuelType(models.TextChoices):
 
 class VehicleType(models.Model):
     name = models.CharField(max_length=255, unique=True)
-    # double_decker = models.BooleanField(null=True)
-    # coach = models.BooleanField(null=True)
-    # electric = models.BooleanField(null=True)
     style = models.CharField(choices=VehicleTypeType.choices, max_length=13, blank=True)
     fuel = models.CharField(choices=FuelType.choices, max_length=8, blank=True)
 
@@ -124,46 +119,40 @@ class VehicleType(models.Model):
 
 class Livery(models.Model):
     name = models.CharField(max_length=255, db_index=True)
-    colour = models.CharField(
+    show_name = models.BooleanField(default=True)
+    colour = ColourField(
         max_length=7, help_text="For the most simplified version of the livery"
     )
-    colours = models.CharField(
+    colours = ColoursField(
         max_length=512,
         blank=True,
-        help_text="""Keep it simple.
-Simplicity (and being able to read the route number on the map) is much more important than 'accuracy'.""",
+        help_text="""Left and right CSS will be generated from this""",
     )
-    css = models.CharField(
-        max_length=1024,
-        blank=True,
-        verbose_name="CSS",
-        help_text="""Leave this blank.
-A livery can be adequately represented with a list of colours and an angle.""",
-    )
-    left_css = models.CharField(
+    angle = models.PositiveSmallIntegerField(null=True, blank=True)
+    left_css = CSSField(
         max_length=1024,
         blank=True,
         verbose_name="Left CSS",
         help_text="Automatically generated from colours and angle",
     )
-    right_css = models.CharField(
+    right_css = CSSField(
         max_length=1024,
         blank=True,
         verbose_name="Right CSS",
-        help_text="Automatically generated from colours and angle",
+        help_text="Should be a mirror image of the left CSS",
     )
     white_text = models.BooleanField(default=False)
-    text_colour = models.CharField(max_length=7, blank=True)
-    stroke_colour = models.CharField(
+    text_colour = ColourField(max_length=7, blank=True)
+    stroke_colour = ColourField(
         max_length=7, blank=True, help_text="Use sparingly, often looks shit"
     )
     horizontal = models.BooleanField(
         default=False, help_text="Equivalent to setting the angle to 90"
     )
-    angle = models.PositiveSmallIntegerField(null=True, blank=True)
-    updated_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(null=True, blank=True, auto_now=True)
     published = models.BooleanField(
-        help_text="Tick to include in the CSS and be able to apply this livery to vehicles"
+        default=False,
+        help_text="Tick to include in the CSS and be able to apply this livery to vehicles",
     )
 
     history = HistoricalRecords()
@@ -179,22 +168,17 @@ A livery can be adequately represented with a list of colours and an angle.""",
     def minify(css):
         prefix = ".livery{background:"
         suffix = "}"
-        css = lightningcss.process_stylesheet(prefix + css + suffix)
+        css = prefix + css + suffix
+        completed_process = subprocess.run(
+            ["lightningcss", "--minify"], input=css.encode(), capture_output=True
+        )
+        css = completed_process.stdout.decode().strip()
         assert css.startswith(prefix)
         assert css.endswith(suffix)
         return css[19:-1]
 
     def set_css(self):
-        if self.css:
-            css = self.css
-            self.left_css = self.css
-            for angle in re.findall(r"\((\d+)deg,", css):
-                replacement = 360 - int(angle)
-                css = css.replace(f"({angle}deg,", f"({replacement}deg,", 1)
-                # doesn't work with e.g. angles {a, b} where a = 360 - b
-            self.right_css = css.replace("left", "right")
-
-        elif self.colours:
+        if self.colours:
             self.left_css = get_css(
                 self.colours.split(), None, self.horizontal, self.angle
             )
@@ -218,28 +202,9 @@ A livery can be adequately represented with a list of colours and an angle.""",
         else:
             return format_html(div + ' title="{}"></div>', self.name)
 
-    def clean(self):
-        Vehicle.clean(self)  # validate colours field
-
-        for attr in ("colour", "stroke_colour", "text_colour"):
-            value = getattr(self, attr)
-            if value:
-                try:
-                    html5_parse_simple_color(value)
-                except ValueError as e:
-                    raise ValidationError({attr: str(e)})
-
-        for attr in ("css", "left_css", "right_css"):
-            value = getattr(self, attr)
-            if value.count("(") != value.count(")"):
-                raise ValidationError({attr: "Must contain equal numbers of ( and )"})
-            if "{" in value or "}" in value:
-                raise ValidationError({attr: "Must not contain { or }"})
-
     def save(self, *args, update_fields=None, **kwargs):
-        self.updated_at = timezone.now()
         if update_fields is None:
-            if self.css or self.colours:
+            if self.colours:
                 self.set_css()
                 if self.colours and not self.id:
                     self.white_text = get_text_colour(self.colours) == "#fff"
@@ -248,21 +213,22 @@ A livery can be adequately represented with a list of colours and an angle.""",
                 self.left_css = self.minify(self.left_css)
         super().save(*args, update_fields=update_fields, **kwargs)
 
-    def get_styles(self):
+    def get_styles(self, livery_ids=None):
         if not self.left_css:
             return []
-        selector = f".livery-{self.id}"
-        css = f"background: {self.left_css}"
+        if not livery_ids:
+            livery_ids = (self.id,)
+        selector = ",".join(f".livery-{livery_id}" for livery_id in livery_ids)
+        css = f"  background: {self.left_css}"
         if self.text_colour:
-            css = f"{css};\n  color:{self.text_colour};fill:{self.text_colour}"
+            css = f"{css};\n  color: {self.text_colour}"
         elif self.white_text:
-            css = f"{css};\n  color:#fff;fill:#fff"
+            css = f"{css};\n  color: #fff"
         if self.stroke_colour:
-            css = f"{css};stroke:{self.stroke_colour}"
-        styles = [f"{selector} {{\n  {css}\n}}\n"]
+            css = f"{css};\n  stroke: {self.stroke_colour}"
         if self.right_css != self.left_css:
-            styles.append(f"{selector}.right {{\n  background: {self.right_css}\n}}\n")
-        return styles
+            css += f";\n  &.right{{\n    background:{self.right_css}\n  }}"
+        return [f"{selector}{{\n{css}\n}}\n"]
 
 
 class VehicleFeature(models.Model):
@@ -290,7 +256,7 @@ class Vehicle(models.Model):
     vehicle_type = models.ForeignKey(
         VehicleType, models.SET_NULL, null=True, blank=True
     )
-    colours = models.CharField(max_length=255, blank=True)
+    colours = ColoursField(max_length=255, blank=True)
     livery = models.ForeignKey(Livery, models.SET_NULL, null=True, blank=True)
     name = models.CharField(max_length=255, blank=True)
     branding = models.CharField(max_length=255, blank=True)
@@ -314,11 +280,17 @@ class Vehicle(models.Model):
     def is_spare_ticket_machine(self) -> bool:
         return self.notes == "Spare ticket machine"
 
-    def has_uk_reg(self):
-        return " " in self.get_reg()
-
     def is_editable(self) -> bool:
-        return not self.locked
+        if self.locked:
+            return False
+        # withrawn and hasn't tracked recently - "let sleeping dogs lie"
+        if self.withdrawn and (
+            not self.latest_journey
+            or timezone.now() - self.latest_journey.datetime
+            > datetime.timedelta(days=30)
+        ):
+            return False
+        return True
 
     def save(self, *args, update_fields=None, **kwargs):
         if (
@@ -368,19 +340,31 @@ class Vehicle(models.Model):
             return str(fleet_code)
         return self.code.replace("_", " ")
 
-    def get_previous(self):
-        if self.fleet_number and self.operator:
-            vehicles = self.operator.vehicle_set.filter(
-                withdrawn=False, fleet_number__lt=self.fleet_number
-            )
-            return vehicles.order_by("-fleet_number").first()
+    def get_next(self, order=""):
+        lookup = "lt" if order == "-" else "gt"
+        if self.operator:
+            filter = {}
+            if self.fleet_number:
+                filter[f"fleet_number__{lookup}"] = self.fleet_number
+                order_by = f"{order}fleet_number"
+            elif self.fleet_code:
+                filter[f"fleet_code__{lookup}"] = self.fleet_code
+                order_by = f"{order}fleet_code"
+            else:
+                filter[f"code__{lookup}"] = self.code
+                order_by = f"{order}code"
 
-    def get_next(self):
-        if self.fleet_number and self.operator:
-            vehicles = self.operator.vehicle_set.filter(
-                withdrawn=False, fleet_number__gt=self.fleet_number
+            return (
+                self.operator.vehicle_set.filter(
+                    **filter,
+                    withdrawn=False,
+                )
+                .order_by(order_by)
+                .first()
             )
-            return vehicles.order_by("fleet_number").first()
+
+    def get_previous(self):
+        return self.get_next(order="-")
 
     def get_reg(self):
         return format_reg(self.reg)
@@ -424,56 +408,20 @@ class Vehicle(models.Model):
     def get_edit_url(self):
         return reverse("vehicle_edit", args=(self.slug or self.id,))
 
-    def get_history_url(self):
-        return reverse("vehicle_history", args=(self.slug or self.id,))
-
     def get_flickr_url(self):
         if self.reg:
             reg = self.get_reg()
             search = f'{self.reg} or "{reg}"'
-            if self.fleet_number and self.operator and self.operator.parent:
-                number = str(self.fleet_number)
-                if len(number) >= 5:
-                    search = f"{search} or {self.operator.parent} {number}"
-        else:
-            if self.fleet_code or self.fleet_number:
-                search = self.fleet_code or str(self.fleet_number)
-            else:
-                search = str(self).replace("/", " ")
-            if self.operator:
-                name = str(self.operator).split(" (", 1)[0]
-                if "Yellow" not in name:
-                    name = (
-                        str(self.operator)
-                        .replace(" Buses", "", 1)
-                        .replace(" Coaches", "", 1)
-                    )
-                if (
-                    name.startswith("First ")
-                    or name.startswith("Stagecoach ")
-                    or name.startswith("Arriva ")
-                ):
-                    name = name.split()[0]
-                search = f"{name} {search}"
-        return (
-            f"https://www.flickr.com/search/?text={quote(search)}&sort=date-taken-desc"
-        )
+            return f"https://www.flickr.com/search/?text={quote(search)}&sort=date-taken-desc"
 
     def get_flickr_link(self):
-        if self.is_spare_ticket_machine():
-            return ""
-        return format_html(
-            '<a href="{}" target="_blank" rel="noopener">Flickr</a>',
-            self.get_flickr_url(),
-        )
+        if url := self.get_flickr_url():
+            return format_html(
+                '<a href="{}" target="_blank" rel="noopener">Flickr</a>', url
+            )
+        return ""
 
     get_flickr_link.short_description = "Flickr"
-
-    def clean(self):
-        try:
-            get_text_colour(self.colours)
-        except ValueError as e:
-            raise ValidationError({"colours": str(e)})
 
     def get_json(self):
         json = {
@@ -513,17 +461,6 @@ class VehicleCode(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=("code", "scheme"))]
-
-
-class VehicleEditVote(models.Model):
-    by_user = models.ForeignKey(settings.AUTH_USER_MODEL, models.CASCADE)
-    for_revision = models.ForeignKey(
-        "VehicleRevision", models.CASCADE, null=True, blank=True
-    )
-    positive = models.BooleanField()
-
-    class Meta:
-        unique_together = (("by_user", "for_revision"),)
 
 
 class VehicleRevisionFeature(models.Model):
@@ -588,8 +525,6 @@ class VehicleRevision(models.Model):
     pending = models.BooleanField(default=False)
     disapproved = models.BooleanField(default=False)
     disapproved_reason = models.TextField(null=True, blank=True)
-
-    score = models.SmallIntegerField(default=0)
 
     class Meta:
         constraints = [
@@ -692,6 +627,13 @@ class VehicleRevision(models.Model):
                     if vehicle.withdrawn and after == "Yes":
                         vehicle.withdrawn = False
                         fields.append("withdrawn")
+                elif key == "fleet number":
+                    vehicle.fleet_code = before
+                    if before.isdigit():
+                        vehicle.fleet_number = int(vehicle.fleet_number)
+                    else:
+                        vehicle.fleet_number = None
+                    fields += ["fleet_number", "fleet_code"]
                 else:
                     yield f"vehicle {vehicle.id} {key} not reverted"
 
@@ -702,19 +644,28 @@ class VehicleRevision(models.Model):
 
 class VehicleJourney(models.Model):
     datetime = models.DateTimeField()
-    service = models.ForeignKey(Service, models.SET_NULL, null=True, blank=True)
+    date = models.DateField()
+    service = models.ForeignKey(
+        Service, models.SET_NULL, null=True, blank=True, db_index=False
+    )
     route_name = models.CharField(max_length=64, blank=True)
     source = models.ForeignKey(DataSource, models.CASCADE)
-    vehicle = models.ForeignKey(Vehicle, models.CASCADE, null=True, blank=True)
+    vehicle = models.ForeignKey(
+        Vehicle, models.CASCADE, null=True, blank=True, db_index=False
+    )
     code = models.CharField(max_length=255, blank=True)
     destination = models.CharField(max_length=255, blank=True)
-    direction = models.CharField(max_length=8, blank=True)
-    trip = models.ForeignKey("bustimes.Trip", models.SET_NULL, null=True, blank=True)
+    direction = models.CharField(max_length=13, blank=True)
+    trip = models.ForeignKey(
+        "bustimes.Trip", models.SET_NULL, null=True, blank=True, db_index=False
+    )
+    # trip_matched = models.BooleanField(default=True)
     # block = models.ForeignKey("bustimes.Block", models.SET_NULL, null=True, blank=True)
     uuid = models.UUIDField(default=uuid.uuid4, editable=False)
 
     def get_absolute_url(self):
-        return f"/vehicles/{self.vehicle_id}?date={self.datetime.date()}#journeys/{self.id}"
+        # TODO: change to "/journeys/{self.id}" (actually using `reverse()`)
+        return f"/vehicles/{self.vehicle_id}?date={self.date}#journey-{self.id}"
 
     def __str__(self):
         when = f"{self.datetime:%-d %b %y %H:%M} {self.route_name} {self.code} {self.direction}"
@@ -725,29 +676,44 @@ class VehicleJourney(models.Model):
     class Meta:
         ordering = ("id",)
         indexes = [
+            models.Index("service", "date", name="vehiclejourney_service_date"),
             models.Index(
-                "service", TruncDate("datetime").asc(), name="service_datetime_date"
+                "vehicle",
+                "date",
+                name="vehiclejourney_vehicle_date",
+                condition=Q(vehicle__isnull=False),
             ),
             models.Index(
-                "vehicle", TruncDate("datetime").asc(), name="vehicle_datetime_date"
+                "trip",
+                "date",
+                name="vehiclejourney_trip_date",
+                condition=Q(trip__isnull=False),
+            ),
+            models.Index(
+                "route_name",
+                "date",
+                name="route_name__date",
+                condition=Q(service__isnull=True),
             ),
         ]
-        unique_together = (("vehicle", "datetime"),)
 
     def get_redis_key(self):
         return self.uuid.bytes
 
     get_trip = get_trip
 
+    def get_trip_block_url(self):
+        url = reverse("block_detail", args=(self.trip_id,))
+        return f"{url}?date={self.date}"
 
-# class VehiclePosition:
-#     journey = models.ForeignKey(VehicleJourney, on_delete)
-
-
-class Occupancy(models.TextChoices):
-    SEATS_AVAILABLE = "seatsAvailable", "Seats available"
-    STANDING_AVAILABLE = "standingAvailable", "Standing available"
-    FULL = "full", "Full"
+    def get_service_link(self):
+        if self.service:
+            slug = self.service.slug
+        else:
+            slug = f"{self.vehicle.operator_id}:{self.route_name}"
+        return (
+            reverse("service_vehicles", args=(slug,)) + "?date=" + self.date.isoformat()
+        )
 
 
 class VehicleLocation:
@@ -768,9 +734,6 @@ class VehicleLocation:
         self.occupancy_thresholds = None
         self.block = block
         self.tfl_code = None
-
-    def get_occupancy_display(self):
-        return Occupancy(self.occupancy).label
 
     def __str__(self):
         return f"{self.datetime:%-d %b %Y %H:%M:%S}"
@@ -814,8 +777,8 @@ class VehicleLocation:
             "coordinates": location[1:3],
             "delta": (location[5] or None) and location[6],
             "direction": (location[3] or None) and location[4],
-            "datetime": datetime.datetime.fromtimestamp(
-                location[0], datetime.timezone.utc
+            "datetime": timezone.localtime(
+                datetime.datetime.fromtimestamp(location[0], datetime.timezone.utc)
             ),
         }
 
@@ -827,7 +790,7 @@ class VehicleLocation:
             "journey_id": journey.id,
             "coordinates": self.latlong.coords,
             "heading": self.heading,
-            "datetime": self.datetime,
+            "datetime": timezone.localtime(self.datetime),
             "destination": journey.destination,
             "block": self.block,
         }
@@ -845,12 +808,12 @@ class VehicleLocation:
             json["service"] = {"line_name": journey.route_name}
 
         if self.seated_occupancy is not None and self.seated_capacity is not None:
-            if self.occupancy == "full":
+            if self.occupancy == "Full":
                 json["seats"] = self.occupancy
             else:
                 json["seats"] = f"{self.seated_capacity - self.seated_occupancy} free"
         elif self.occupancy:
-            json["seats"] = self.get_occupancy_display()
+            json["seats"] = self.occupancy
         if self.wheelchair_occupancy is not None and self.wheelchair_capacity:
             if self.wheelchair_occupancy < self.wheelchair_capacity:
                 json["wheelchair"] = "free"
@@ -861,6 +824,21 @@ class VehicleLocation:
 
 
 class SiriSubscription(models.Model):
-    name = models.CharField(max_length=64, blank=True, unique=True)
+    name = models.CharField(
+        max_length=64,
+        blank=True,
+        unique=True,
+        help_text="There should be a DataSource with the same name as this",
+    )
     uuid = models.UUIDField(default=uuid.uuid4, editable=False)
     sample = models.TextField(null=True, blank=True)
+    producer_url = models.URLField(null=True, blank=True, max_length=64)
+    username = models.CharField(null=True, blank=True, max_length=64)
+    password = models.CharField(null=True, blank=True, max_length=64)
+    requestor_ref = models.CharField(null=True, blank=True, max_length=64)
+
+    def __str__(self):
+        return self.name
+
+    def get_status_key(self):
+        return f"{self.name.replace(' ', '_')}_status"

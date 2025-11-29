@@ -1,34 +1,25 @@
-@import 'base';
+@use "sass:meta";
+@use 'base';
 
 @media (min-width: 30em) {
-    @import '30em';
+    @include meta.load-css('30em');
 }
 
 @media (min-width: 48em) {
-    @import '48em';
+    @include meta.load-css('48em');
 }
 
 @media (min-width: 62.5em) {
-    @import '62em';
+    @include meta.load-css('62em');
 }
 
 @media print {
-    @import 'print';
+    @include meta.load-css('print');
 }
 
 @media (min-width: 970px) {
     .narrow .ad-wrapper {
         margin: 1em -121px 10px; // 970px
-    }
-}
-
-@media (min-width: 1200px) {
-    .narrow .ad-wrapper {
-        margin: 1em -236px 10px; // 1200
-    }
-
-    .wide .ad-wrapper {
-        margin: 1em -116px 10px;  // 1200px
     }
 }
 

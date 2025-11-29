@@ -1,3 +1,8 @@
+# I use Kamal (https://kamal-deploy.org) for deploying and stuff, and this is the configuration for that.
+# (Secrets live in `.kamal/secrets`, quite rightly omitted from the git repo!)
+
+# (yes, DHH is a bellend. I'm sorry)
+
 # Name of your application. Used to uniquely configure containers.
 service: bustimes
 
@@ -8,19 +13,21 @@ image: jclgoodwin/bustimes-org
 servers:
   web:
     hosts:
-      - 10.131.29.248  # everglory
-      - 10.131.0.24    # eveready
-      - 10.131.240.95
+      - 10.131.240.113
+      - 10.131.240.116
+      - 10.131.240.117
+      - 10.131.240.118
     env:
       clear:
         WEB_CONCURRENCY: 8
-        ALLOWED_HOSTS: "*"
         EMAIL_HOST: email-smtp.eu-west-1.amazonaws.com
+        ALLOWED_HOSTS: bustimes.org
       secret:
-        - TURNSTILE_SECRET
+        - SECRET_KEY
         - DATABASE_URL
         - REDIS_URL
         - SENTRY_DSN
+        - TURNSTILE_SECRET
         - EMAIL_HOST_USER
         - EMAIL_HOST_PASSWORD
         - TFL_APP_ID
@@ -28,38 +35,38 @@ servers:
         - NTA_API_KEY
         - AWS_ACCESS_KEY_ID
         - AWS_SECRET_ACCESS_KEY
-builder:
-  multiarch: false
 
-# Credentials for your image host.
+accessories:
+  tileserver:
+    image: maptiler/tileserver-gl-light:v5.4.0
+    host: 138.68.161.218
+    port: 80:8080
+    volumes:
+      - /root/data:/data
+
+    # to upgrade,
+    # first run `docker image pull maptiler/tileserver-gl-light` on the host
+    # then `kamal accessory reboot tileserver`
+
+builder:
+  arch: amd64
+  cache:
+    type: registry
+
 registry:
-  # Specify the registry server, if you're not using Docker Hub
-  server: registry.digitalocean.com/hobsbawm
-  # see https://github.com/settings/tokens
-  username:
-    - KAMAL_REGISTRY_PASSWORD
-  password:
-    - KAMAL_REGISTRY_PASSWORD
+  server: localhost:5000
 
 asset_path: /staticfiles
 
-# Configure a custom healthcheck (default is /up on port 3000)
-healthcheck:
-  path: /version
-  port: 8000
-
-# use `kamal traefik reboot --hosts=HOST` to deploy changes to this - best not to do all hosts at once
-traefik:
-  args:
-    accesslog: true
-    accesslog.fields.headers.names.user-agent: keep
-    accesslog.fields.headers.names.referer: keep
-    entrypoints.http.address: ":80" # for some reason, if trustedIPs is set then this must be set too
-    entrypoints.http.forwardedHeaders.trustedIPs: 10.131.0.0/16
-
-#accessories:
-#  valkey:
-#    service: valkey
-#    image: valkey/valkey
-#    roles:
-#      - redis
+proxy:
+  app_port: 8000
+  buffering:
+    # we go to great effort to _stream_ certain big slow responses (big timetables)
+    # to reduce the time-to-first-byte,
+    # so we disable response buffering which would undo all that hard work
+    responses: false
+  logging:
+    request_headers:
+      - Referer
+      - CF-IPCountry
+    response_headers: []

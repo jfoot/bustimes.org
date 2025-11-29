@@ -15,7 +15,7 @@ from .import_atco_cif import Command as ImportAtcoCif
 
 class Command(BaseCommand):
     """
-    Check the Open Data NI (Northern Ireland) website API for any new
+    Check the Open Data NI (Northern Ireland) website CKAN API for any new
     Translink Metro and Ulsterbus data,
     and download it and call the import_atco_cif command if necessary
     """
@@ -44,7 +44,7 @@ class Command(BaseCommand):
                     pprint.pprint(resource)
 
                     url = resource["url"]
-                    path = Path(settings.DATA_DIR) / Path(url).name
+                    path = Path(settings.DATA_DIR) / f"{source.id}.zip"
                     download(path, url)
 
                     command = ImportAtcoCif()

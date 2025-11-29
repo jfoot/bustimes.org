@@ -28,10 +28,7 @@ class VehicleSerializer(serializers.ModelSerializer):
     operator = serializers.SerializerMethodField()
     livery = serializers.SerializerMethodField()
     vehicle_type = VehicleTypeSerializer()
-    special_features = serializers.SerializerMethodField()
-
-    def get_special_features(self, obj):
-        return [feature.name for feature in obj.features.all()]
+    special_features = serializers.ListField()
 
     def get_operator(self, obj):
         if obj.operator_id:
@@ -68,6 +65,7 @@ class VehicleSerializer(serializers.ModelSerializer):
             "name",
             "notes",
             "withdrawn",
+            "special_features",
         ]
 
 
@@ -98,16 +96,18 @@ class ServiceSerializer(serializers.ModelSerializer):
             "region_id",
             "mode",
             "operator",
+            "modified_at",
         ]
 
 
 class StopSerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
     long_name = serializers.SerializerMethodField()
     location = serializers.SerializerMethodField()
     icon = serializers.SerializerMethodField()
-
-    def get_long_name(self, obj):
-        return obj.get_long_name()
+    line_names = serializers.ListField()
+    get_name = staticmethod(StopPoint.get_name_for_timetable)
+    get_long_name = staticmethod(StopPoint.get_long_name)
 
     def get_location(self, obj):
         if obj.latlong:
@@ -122,10 +122,12 @@ class StopSerializer(serializers.ModelSerializer):
             "atco_code",
             "naptan_code",
             "common_name",
+            "name",
             "long_name",
             "location",
             "indicator",
             "icon",
+            "line_names",
             "bearing",
             "heading",
             "stop_type",
@@ -173,16 +175,20 @@ class TripSerializer(serializers.ModelSerializer):
     operator = serializers.SerializerMethodField()
     times = serializers.SerializerMethodField()
     notes = NoteSerializer(many=True)
+    headsign = serializers.CharField(source="destination_name")
 
-    def get_service(self, obj):
-        return {
-            "id": obj.route.service_id,
-            "line_name": obj.route.line_name,
-            "slug": obj.route.service and obj.route.service.slug,
-            "mode": obj.route.service and obj.route.service.mode,
-        }
+    @staticmethod
+    def get_service(obj):
+        if obj.route:
+            return {
+                "id": obj.route.service_id,
+                "line_name": obj.route.line_name,
+                "slug": obj.route.service and obj.route.service.slug,
+                "mode": obj.route.service and obj.route.service.mode,
+            }
 
-    def get_operator(self, obj):
+    @staticmethod
+    def get_operator(obj):
         if obj.operator:
             return {
                 "noc": obj.operator_id,
@@ -191,14 +197,18 @@ class TripSerializer(serializers.ModelSerializer):
                 "slug": obj.operator.slug,
             }
 
-    def get_times(self, obj):
+    @staticmethod
+    def get_times(obj):
         if not hasattr(obj, "stops"):
             return
 
-        route_links = {}
-        if obj.route.service:
-            for link in obj.route.service.routelink_set.all():
-                route_links[(link.from_stop_id, link.to_stop_id)] = link
+        if obj.route and obj.route.service:
+            route_links = {
+                (link.from_stop_id, link.to_stop_id): link
+                for link in obj.route.service.routelink_set.all()
+            }
+        else:
+            route_links = {}
         previous_stop_id = None
 
         for stop_time in obj.stops:
@@ -232,6 +242,7 @@ class TripSerializer(serializers.ModelSerializer):
                 "expected_departure_time": getattr(
                     stop_time, "expected_departure", None
                 ),
+                # "call_condition": stop_time.call_condition,
             }
             previous_stop_id = stop_time.stop_id
 
@@ -242,6 +253,9 @@ class TripSerializer(serializers.ModelSerializer):
             "vehicle_journey_code",
             "ticket_machine_code",
             "block",
+            "start",
+            "end",
+            "headsign",
             "service",
             "operator",
             "notes",
@@ -263,4 +277,11 @@ class VehicleJourneySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = VehicleJourney
-        fields = ["id", "datetime", "vehicle", "trip_id", "route_name", "destination"]
+        fields = [
+            "id",
+            "datetime",
+            "vehicle",
+            "route_name",
+            "destination",
+            "trip_id",
+        ]

@@ -1,5 +1,6 @@
-import ciso8601
 import requests
+import ciso8601
+
 from django.contrib.gis.geos import GEOSGeometry
 from django.utils import timezone
 
@@ -28,8 +29,24 @@ class Command(ImportLiveVehiclesCommand):
         ImportLiveVehiclesCommand.add_arguments(parser)
 
     def handle(self, source_name, **options):
-        self.source_name = source_name
+        self.source_name = self.vehicle_code_scheme = source_name
         super().handle(**options)
+
+    @staticmethod
+    def get_vehicle_identity(item):
+        return f"{item['OperatorRef']}:{item['VehicleRef']}"
+
+    @staticmethod
+    def get_journey_identity(item):
+        return (
+            item["JourneyCode"],
+            item["PublishedLineName"],
+            item["DestinationRef"],
+        )
+
+    @staticmethod
+    def get_item_identity(item):
+        return item["RecordedAtTime"]
 
     @staticmethod
     def get_datetime(item):
@@ -108,26 +125,30 @@ class Command(ImportLiveVehiclesCommand):
         ):
             return latest_journey
 
-        if datetime:
-            try:
-                return vehicle.vehiclejourney_set.select_related("service").get(
-                    datetime=datetime
-                )
-            except VehicleJourney.DoesNotExist:
-                pass
+        if datetime and (
+            journey := vehicle.vehiclejourney_set.filter(
+                date=timezone.localdate(datetime), datetime=datetime
+            ).first()
+        ):
+            return journey
 
         journey = VehicleJourney(
             datetime=datetime,
             code=code or "",
             route_name=item["PublishedLineName"] or "",
             service=self.get_service(item),
-            destination=item["DestinationStopName"] or "",
+            destination=item["DestinationStopLocality"]
+            or item["DestinationStopName"]
+            or "",
+            direction=item["DirectionRef"],
         )
 
         if journey.service_id and not journey.id and datetime:
             journey.trip = journey.get_trip(
                 departure_time=datetime, destination_ref=item["DestinationRef"]
             )
+            if journey.trip and not journey.destination:
+                journey.destination = journey.trip.headsign or ""
 
         return journey
 

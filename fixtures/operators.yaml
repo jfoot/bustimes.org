@@ -1,14 +1,12 @@
-SNDR:
-  email: sales@sanderscoaches.com
-PTSG:
-  name: Wrights Coaches
+# This file contains overrides/corrections to the Traveline NOC (national operator code) database
+# See busstops/management/commands/import_noc.py
+
 IGOB:
   name: National Express Accessible Transport
   url: https://www.nationalexpress.com/en/neat
   phone: ""
   email: ""
   address: ""
-  twitter: ""
 AVMT:
   name: Axe Valley Mini Travel (AVMT)
   url: https://avmtbustimes.wixsite.com/mysite/timetables
@@ -44,7 +42,7 @@ CRES:
 DJWA:
   name: Torbay Mini Buses
 ANRW:
-  name: Andrew’s (Shetland)
+  name: Andrew's (Shetland)
   address: ""
   email: info@andrewsshetland.com
   url: http://www.andrewsshetland.com
@@ -57,14 +55,6 @@ SBDR:
     LU6 1QQ
   url: http://www.sbdar.co.uk
   phone: 01525 220044
-PCLT:
-  name: Rural Link
-MBGD:
-  url: https://uk.megabus.com
-MEGA:
-  url: https://uk.megabus.com
-NSLA:
-  url: http://www.gatwickairport.com/to-and-from/by-coach-or-bus/hotel-buses/
 DOCC:
   address: |
     Dorset Travel
@@ -81,20 +71,10 @@ CNTY:
   name: Country Bus (Newton Abbot)
 MULB:
   url: http://www.mullanyscoaches.com
-TAFV:
-  url: http://tafvalleycoaches.co.uk
 HOGG:
   url: https://roadhoggs.co.uk/timetables/
-JTMT:
-  url: ""
 EBLY:
   url: http://www.ebleyexcursions.co.uk/school-timetables
-HCMN:
-  name: MacNeil Coaches
-  phone: 075060 72309
-FALC:
-  twitter: FalconBusCoach
-  email: ""
 CBBH:
   name: Centrebus (South)
 CBNL:
@@ -113,8 +93,6 @@ AKSS:
   url: https://www.arrivabus.co.uk/kent-and-surrey
 ARHE:
   url: https://www.arrivabus.co.uk/herts-and-essex
-ADER:
-  url: https://www.arrivabus.co.uk/midlands/bus-travel-in-derby
 AMID:
   url: https://www.arrivabus.co.uk/midlands
 AMSY:
@@ -131,30 +109,12 @@ AOLC:
   name: A1 Coaches (Liverpool)
 GLCS:
   name: Globe Holidays (Barnsley)
-YACT:
-  name: https://www.transdevbus.co.uk/coastliner/ # (no separate York and Country URL yet)
 TPEN:
   url: https://www.transdevbus.co.uk/team-pennine/
-HRGT:
-  url: https://www.transdevbus.co.uk/the-harrogate-bus-company/
-KDTR:
-  url: https://www.transdevbus.co.uk/the-keighley-bus-company/
-LNUD:
-  url: https://www.transdevbus.co.uk/the-blackburn-bus-company/
-BPTR:
-  url: https://www.transdevbus.co.uk/the-burnley-bus-company/
+YACT:
+  url: https://www.transdevbus.co.uk/coastliner/
 FECS:
   name: First Eastern Counties
-  twitter: |
-    FirstNorwich
-    FirstIpswich
-    FirstYar_Low
-    First_Excel
-GECL:
-  twitter: GallowayLive
-ECLN:
-  url: https://edinburghcoachlines.com/service-13-2/
-  twitter: ECLTravel
 TOTN:
   name: Totnes Community Bus
 SWDC:
@@ -164,37 +124,8 @@ SWDC:
     Dawlish
     Devon
     EX7 9QH
-TRDU:
-  twitter: XploreDundee
-  url: https://www.xploredundee.com/
-  address: |
-    Xplore Dundee Travel Centre
-    80-82 Commercial Street
-    Dundee
-    DD1 2AP
-  phone: 01382 221609
-  email: xploredundee@mcgillsbuses.co.uk
 RYCA:
   url: https://ryedalect.org/our-services/local-bus-services/
-  address: |
-    2 Minster Court
-    Hugden Way
-    Norton
-    Malton
-    YO17 9NJ
-  email: post@ryedalect.org
-  twitter: RyedaleCT
-NXHH:
-  address: ""
-  email: Comments-Hallmark@rotala.co.uk
-  phone: ""
-MAYC:
-  name: Maynes Coaches
-  url: http://www.maynes.co.uk
-  twitter: MaynesCoaches
-  address: ""
-  email: ""
-  phone: ""
 CTCL:
   name: CT Passenger
   url: http://www.ctpassenger.org/
@@ -204,13 +135,10 @@ CTCL:
     Coventry
     CV6 6HH
   phone: 024 7669 1433
-TEXP:
-  phone: 07545 164579
 STNE:
   url: https://stanley-travel.com/bus-timetables/
-RBTS:
-  name: Roberts Travel
 KCTB:
+  # name: Konectbus (Norfolk)
   phone: 03300 539358
   address: |
     Norwich Bus Station
@@ -218,112 +146,50 @@ KCTB:
     Norwich
     NR1 3NX
 HEDO:
+  name: KonectBuses (formerly Hedingham & Chambers)
   url: https://www.hedinghamandchambers.co.uk/
 CHAM:
   url: https://www.hedinghamandchambers.co.uk/
 BHBC:
   name: Brighton & Hove
-EDWC:
-  address: |
-    Edwards Busnes Parc
-    Llantrisant
-    Pontyclun
-    CF72 8QZ
 WNCT:
-  twitter: GoToTown2016
   address: |
     Unit 7 & 8
     Merchants Close
-    King’s Lynn
+    King's Lynn
     PE30 4JX
   email: enquiries@wnct.co.uk
 HAIN:
   name: Phil Haines Coaches
-HCTY:
-  twitter: ""
 ULCO:
   address: ""
   email: ""
   url: ""
-CAEL:
-  name: Caelloi
-  url: https://www.caelloi.co.uk/
-AINT:
-  url: http://www.aintreecoachline.com/
-  email: info@aintreecoachline.com
-  twitter: ""
 NUTT:
   name: Transpora North West
   aka: Coastliner Buses
-  url: https://www.coastlinerbuses.co.uk/
-  email: blackpool@transporagroup.co.uk
-  phone: 01253 761739
-  address: |
-    Brinwell Road Bus Garage
-    Mereside
-    Blackpool
-    FY4 4QU
+  url: https://www.transporabus.uk
 MDBC:
   url: ""
-DDIS:
-  url: https://procterscoaches.com/dales-district-timetable/
-TANV:
-  email: contact@tanat.co.uk
-  url: https://tanat.co.uk/
-  twitter: ""
 BZCO:
   url: https://www.beelinecoaches.co.uk/
 LNGS:
   url: https://www.lylescoaches.co.uk/
 YSTN:
   url: https://www.stationcoaches.co.uk/
-SPMW:
-  url: https://www.stringerscoaches.co.uk/
-UNOE:
-  twitter: UnoHerts
-FCWL:
-  twitter: by_Kernow
-SSSN:
-  name: Shoreline Suncruisers
-ALCG:
-  url: https://www.alinenortheast.co.uk/
 FCYM:
   name: First Cymru
-FSMR:
-  twitter: FirstWorcester
-MCGL:
-  name: McGill’s
 FSCE:
-  name: McGill’s Scotland East
-  twitter: McGillsEast
-  url: https://www.mcgillsscotlandeast.co.uk/
-  phone: 03330 16 61 62
-  email: enquiries@mcgillsscotlandeast.co.uk
-EMIR:
-  name: London Cable Car
-  aka: Dangleway
-  url: https://tfl.gov.uk/modes/london-cable-car/
-  twitter: ""
-TYSW:
-  name: Applegates
-  url: http://applegates.co.uk/
-  phone: 01453 810314
-  email: info@applegates.co.uk
-  twitter: ""
+  # so it redirects to the other operator with the same name
+  name: Midland Bluebird
+WAEN:
+  name: Macleod's Coaches
+  url: http://macleodscoaches.com/
 YYTG:
   name: Yorkshire Buses
-  # url: https://www.yorkshirebuses.co.uk/
+  url: https://www.yorkshirebuses.co.uk
   phone: 0113 246 4914
-  email: Office@yorkshiretravelgroup.co.uk
-  twitter: YorkshireBuses_
-WNGS:
-  url: https://www.diamondbuses.com/
-MINS:
-  twitter: ""
-NYCC:
-  name: North Yorkshire Council
-  url: https://www.northyorks.gov.uk/public-transport
-  twitter: northyorksc
+  email: traffic@yorkshirebuses.co.uk
 BNVB:
   name: Bee Network - Vision Bus
 BNSM:
@@ -336,31 +202,11 @@ BNFM:
   name: Bee Network - First Manchester
 BNML:
   name: Bee Network - Metroline
-FTZL:
-  url: http://www.filers.co.uk/bus/
 AJTX:
   url: http://taxi-one.co.uk/
-  twitter: AnthonyMullane
-TLYH:
-  url: https://www.tallyhoholidays.co.uk/Service-details
-HRBT:
-  url: https://www.herbertstravel.co.uk/
 COEV:
   name: Coach Events Services
   url: http://www.coacheventsservices.co.uk/
-VECT:
-  name: Central Connect
-  twitter: |
-    CC_EssexHerts
-    CC_EastEngland
-    CC_EastMidlands
-TRST:
-  url: https://localbus.vectare.co.uk/central-connect
-  twitter: CC_EssexHerts
-GLLN:
-  name: Central Connect
-  url: https://localbus.vectare.co.uk/central-connect
-  twitter: CC_EssexHerts
 NCRC:
   url: https://www.wilsonsbuses.co.uk/
 ABCF:
@@ -369,3 +215,68 @@ SLCS:
   url: https://www.selseytowncouncil.gov.uk/article/28402/Community-bus
 GCTG:
   url: https://glenfargct.co.uk/
+ZSIN:
+  url: https://www.zandstransport.co.uk/
+BLSF:
+  url: https://brightlingseaharbour.org/
+BTNA:
+  url: https://www.britanniabus.co.uk/
+BDOL:
+  url: https://www.bakersdolphin.com/
+BDVC:
+  name: Basildon Community Transport
+  url: https://www.basildoncts.co.uk/
+FACT:
+  url: https://fact-cambs.co.uk/
+YTNB:
+  url: https://www.yarrantons.com/
+SBLB:
+  name: Stagecoach North Scotland
+RACB:
+  url: https://www.racb.co.uk/
+FHUD:
+  name: First Huddersfield
+FLON:
+  name: First Bus London
+  url: https://www.firstbus.co.uk/london
+HOWT:
+  name: Omega Busways
+  url: https://www.omegabusways.uk/
+SSSN:
+  url: https://www.shorelinetravel.co.uk/
+WEFC:
+  url: https://www.westmorlandandfurness.gov.uk/parking-streets-and-transport/bus-services/find-bus
+ACAH:
+  name: Aircoach
+KLCO:
+  url: https://klch.co.uk/
+NTMY:
+  name: Ashwood Travel
+SULV:
+  url: https://www.sullivanbuses.com
+ARCT:
+  url: https://archwaytravel.co.uk/
+TXCO:
+  url: https://www.facebook.com/AimeesTravel
+AMGR:
+  url: https://flexi-bus.co.uk/
+FBSM:
+  url: https://www.1stbusstop.co.uk/
+WHTL:
+  url: https://whitelaws.co.uk/
+HCCT:
+  url: https://www.hants.gov.uk/transport/alternativetransport/carshares/services
+TMST:
+  url: http://www.travel-masters.co.uk/
+BJCO:
+  url: https://www.brianjonesbusandcoachhire.co.uk/
+AMBS:
+  url: https://ambassadortravelanglialtd.co.uk/
+DGCB:
+  url: https://www.dumfriesandgalloway.gov.uk/roads-transport-parking/public-transport/bus-ferry-timetables
+YSQU:
+  url: https://www.squarepegbuses.co.uk/
+GOCH:
+  name: Go Bus
+KNCO:
+  url: https://kentcountrybuses.co.uk/

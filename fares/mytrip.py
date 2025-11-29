@@ -1,3 +1,4 @@
+from http import HTTPStatus
 import json
 
 import requests
@@ -5,7 +6,7 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404, render
 from django.utils.safestring import mark_safe
 
-from buses.utils import cache_page
+from buses.utils import cdn_cache_control
 from busstops.models import DataSource, Operator, OperatorCode
 
 
@@ -30,13 +31,13 @@ def get_response(source, code):
         headers={"x-api-key": source.settings["x-api-key"]},
         timeout=3,
     )
-    if response.status_code == 404:
+    if response.status_code == HTTPStatus.NOT_FOUND:
         raise Http404
-    assert response.ok
+    response.raise_for_status()
     return response.json()
 
 
-@cache_page(3600)
+@cdn_cache_control(max_age=3600)
 def operator_tickets(request, slug):
     operator = get_object_or_404(Operator, slug=slug)
     source = get_source()
@@ -58,7 +59,7 @@ def operator_tickets(request, slug):
     return render(request, "operator_tickets.html", context)
 
 
-@cache_page(3600)
+@cdn_cache_control(max_age=3600)
 def operator_ticket(request, slug, id):
     operator = get_object_or_404(Operator, slug=slug)
     source = get_source()

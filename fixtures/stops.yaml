@@ -1,3 +1,6 @@
+# This file contains overrides/corrections to NaPTAN StopPoints
+# See busstops/management/commands/naptan_new.py
+
 # relocate stops from The Street to Dereham Road - buses don't run through Briningham village
 # see https://www.flickr.com/photos/55355638@N05/9821099604/
 2900B482:
@@ -31,12 +34,16 @@
 4200F177502:
     common_name: Atherstone Surgery
 
+# doctor's surgery isn't there any more
+2900B656:
+    common_name: Church Walk
+2900B655:
+    common_name: Church Walk
+
 # clarify that the church isn't the main church in Wells-next-the-Sea
 2900W5712:
     landmark: Congregational church
 
-5710AWA11099:
-    common_name: Wyndham Arcade Stop JE
 5710WDB48472:
     common_name: Wyndham Arcade Stop JJ
 
@@ -57,3 +64,27 @@
     locality_id: E0040542
 0500FWHIY901:
     locality_id: E0040542
+
+#Oadby Coppice Hall
+'260016604':
+    latlong: POINT(-1.086786 52.609883)
+
+'25001195':
+    common_name: Tesco Express
+
+2400A000080A:
+    landmark: Tesco
+2400A000110A:
+    landmark: Tesco
+2400A060490R:
+    landmark: Tesco
+
+2500DCL5664:
+    landmark: Home Bargains
+2500LAA07247:
+    landmark: Home Bargains
+
+5540AWA12164:
+    landmark: Sports Direct
+"370023314":
+    landmark: ""

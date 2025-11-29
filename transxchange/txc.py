@@ -1,7 +1,8 @@
 import calendar
 import datetime
 import logging
-import xml.etree.cElementTree as ET
+import xml.etree.ElementTree as ET
+from functools import cache
 
 from django.contrib.gis.geos import GEOSGeometry, LineString
 from django.utils.dateparse import parse_duration
@@ -10,6 +11,15 @@ logger = logging.getLogger(__name__)
 
 
 WEEKDAYS = {day: i for i, day in enumerate(calendar.day_name)}  # {'Monday:' 0,
+
+
+"""This is intended to be a reusable thing for parsing TransXChange documents
+"""
+
+
+@cache
+def warn_once(msg, *args, **kwargs):
+    return logger.warning(msg, *args, **kwargs)
 
 
 def parse_time(string: str) -> datetime.timedelta:
@@ -35,6 +45,8 @@ class Stop:
         self.indicator = element.findtext("Indicator")
 
         self.locality = element.findtext("LocalityName")
+
+        self.element = element
 
     def __str__(self):
         name = self.common_name
@@ -114,6 +126,10 @@ class JourneyPattern:
                 self.operating_profile, serviced_organisations
             )
 
+        self.block = element.find("Operational/Block")
+        if self.block is not None:
+            self.block = Block(self.block)
+
     def is_inbound(self):
         return self.direction in ("inbound", "anticlockwise")
 
@@ -156,8 +172,10 @@ class JourneyPatternStopUsage:
         if self.wait_time is not None:
             self.wait_time = parse_duration(self.wait_time.text)
             if self.wait_time.total_seconds() > 10000:
-                # bad data detected
-                logger.warning(f"long wait time {self.wait_time} at stop {self.stop}")
+                # bad data detected - we won't do anything about it, just logging FYI
+                logger.warning(
+                    "long wait time %s at stop %s", self.wait_time, self.stop
+                )
 
         self.notes = [
             (note_element.find("NoteCode").text, note_element.find("NoteText").text)
@@ -359,10 +377,26 @@ class VehicleJourney:
                 deadrun = False  # end of dead run
 
             if not deadrun:
+                if wait_time is None:
+                    wait_time = datetime.timedelta()
                 if journey_timinglink and journey_timinglink.from_wait_time is not None:
-                    wait_time = journey_timinglink.from_wait_time
+                    if journey_timinglink.from_wait_time != wait_time:
+                        wait_time += journey_timinglink.from_wait_time
+                    elif wait_time:
+                        warn_once(
+                            "correctly ignored second journey wait time %s at %s",
+                            wait_time,
+                            stopusage.stop.atco_code,
+                        )
                 elif stopusage.wait_time is not None:
-                    wait_time = stopusage.wait_time
+                    if stopusage.wait_time != wait_time:
+                        wait_time += stopusage.wait_time
+                    elif wait_time:
+                        warn_once(
+                            "correctly ignored second journey pattern wait time %s at %s",
+                            wait_time,
+                            stopusage.stop.atco_code,
+                        )
 
                 notes = (
                     journey_timinglink and journey_timinglink.notes or stopusage.notes
@@ -396,6 +430,15 @@ class VehicleJourney:
                     wait_time = journey_timinglink.to_wait_time
                 else:
                     wait_time = stopusage.wait_time
+
+                    if wait_time and wait_time == timinglink.origin.wait_time:
+                        warn_once(
+                            "dodgily ignored second wait time %s from %s to %s",
+                            wait_time,
+                            timinglink.origin.stop.atco_code,
+                            stopusage.stop.atco_code,
+                        )
+                        wait_time = None
 
             if journey_timinglink and journey_timinglink.to_activity:
                 prev_activity = journey_timinglink.to_activity
@@ -654,11 +697,8 @@ class Line:
 
         self.marketing_name = element.findtext("MarketingName")
 
-        if (
-            element.findtext("LineColour")
-            or element.findtext("LineFontColour")
-            or element.findtext("LineImage")
-        ):
+        self.colour = element.findtext("LineColour")
+        if element.findtext("LineFontColour") or element.findtext("LineImage"):
             logger.info(ET.tostring(element).decode())
 
         self.outbound_description = element.findtext("OutboundDescription/Description")
@@ -748,7 +788,7 @@ class TransXChange:
                 try:
                     self.journeys = self.__get_journeys(element, serviced_organisations)
                 except (AttributeError, KeyError) as e:
-                    logger.error(e, exc_info=True)
+                    logger.exception(e)
                     return
                 element.clear()
             elif tag == "Service":

@@ -7,27 +7,27 @@ from warnings import filterwarnings
 
 import dj_database_url
 import sentry_sdk
+
+# from csp.constants import SELF, NONE
 from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.huey import HueyIntegration
 from sentry_sdk.integrations.logging import ignore_logger
 from sentry_sdk.integrations.redis import RedisIntegration
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-SECRET_KEY = os.environ["SECRET_KEY"]
-ALLOWED_HOSTS = os.environ.get(
-    "ALLOWED_HOSTS", "[::1] 127.0.0.1 localhost joshuas-macbook-pro.local"
-).split()
+SECRET_KEY = os.environ.get("SECRET_KEY", "")
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "*").split()
 
 CSRF_TRUSTED_ORIGINS = os.environ.get(
     "CSRF_TRUSTED_ORIGINS",
-    "https://bustimes.org https://staging.bustimes.org https://bustimes-org.fly.dev",
+    "https://bustimes.org",
 ).split()
+CSRF_FAILURE_VIEW = "busstops.views.csrf_failure"
 
 TEST = "test" in sys.argv or "pytest" in sys.argv[0]
 DEBUG = bool(os.environ.get("DEBUG", False))
 
-SERVER_EMAIL = "contact@bustimes.org"
-DEFAULT_FROM_EMAIL = "bustimes.org <contact@bustimes.org>"
+DEFAULT_FROM_EMAIL = '"bustimes.org" <bustimes.org@bustimes.org>'
 
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
+    "django.contrib.postgres",
     "django.contrib.staticfiles",
     "django.contrib.gis",
     "django.contrib.sitemaps",
@@ -63,13 +64,18 @@ INSTALLED_APPS = [
     "simple_history",
     "huey.contrib.djhuey",
     "corsheaders",
+    "csp",
     "turnstile",
+    "django_http_compression",
 ]
 
+
 MIDDLEWARE = [
+    "busstops.middleware.HealthCheckMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
-    "busstops.middleware.GZipIfNotStreamingMiddleware",
+    "csp.middleware.CSPMiddleware",
+    "django_http_compression.middleware.HttpCompressionMiddleware",
     "busstops.middleware.WhiteNoiseWithFallbackMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -80,7 +86,7 @@ MIDDLEWARE = [
 
 # Stadia Maps tiles require we send at least the origin in cross-origin requests.
 # For same-origin requests, the full referrer is useful (e.g. for the contact form)
-SECURE_REFERRER_POLICY = "origin-when-cross-origin"
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_CF_VISITOR", '{"scheme":"https"}')
@@ -89,45 +95,50 @@ SECURE_HSTS_PRELOAD = True
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_REDIRECT_EXEMPT = [r"^version$"]
 
+CONTENT_SECURITY_POLICY = {
+    "DIRECTIVES": {
+        "default-src": None,
+        # "font-src": [SELF],
+        # "media-src": [NONE],
+        "upgrade-insecure-requests": True,
+    },
+}
 
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_URLS_REGEX = r"(^\/(api\/|(vehicles|stops)\.json)|.*\/journeys\/.*)"
 
-if DEBUG and "runserver" in sys.argv:
+if DEBUG and not TEST:
     INSTALLED_APPS += [
         "debug_toolbar",
         "template_profiler_panel",
+        "django_watchfiles",
     ]
     MIDDLEWARE += [
         "debug_toolbar.middleware.DebugToolbarMiddleware",
         "debug_toolbar_force.middleware.ForceDebugToolbarMiddleware",
     ]
-    INTERNAL_IPS = ["127.0.0.1"]
-    # DEBUG_TOOLBAR_PANELS = [
-    #     "template_profiler_panel.panels.template.TemplateProfilerPanel",
-    # ]
+    INTERNAL_IPS = os.environ.get("INTERNAL_IPS", "127.0.0.1").split()
+    DEBUG_TOOLBAR_CONFIG = {"SHOW_TOOLBAR_CALLBACK": "buses.utils.show_toolbar"}
 
 ROOT_URLCONF = "buses.urls"
 
 ASGI_APPLICATION = "buses.asgi.application"
 
 
-DATABASES = {"default": dj_database_url.config(conn_max_age=None)}
+DATABASES = {
+    "default": dj_database_url.config(conn_max_age=None, conn_health_checks=True)
+}
 
-DATABASES["default"]["options"] = {
+DATABASES["default"]["OPTIONS"] = {
     "application_name": os.environ.get("APPLICATION_NAME") or " ".join(sys.argv)[-63:],
     "connect_timeout": 9,
 }
 
 DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
 DATABASES["default"]["TEST"] = {"SERIALIZE": False}
-if DEBUG and "runserver" in sys.argv:
-    del DATABASES["default"][
-        "CONN_MAX_AGE"
-    ]  # reset to the default (i.e. no persistent connections)
-
-TEST_RUNNER = "django_slowtests.testrunner.DiscoverSlowestTestsRunner"
-NUM_SLOW_TESTS = 10
+if "runserver" in sys.argv:
+    # local development server - reset to the default (i.e. no persistent connections)
+    del DATABASES["default"]["CONN_MAX_AGE"]
 
 AUTH_USER_MODEL = "accounts.User"
 LOGIN_REDIRECT_URL = "/vehicles"
@@ -140,16 +151,16 @@ REST_FRAMEWORK = {
 DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 
 READ_DATABASE = "default"
-# if os.environ.get("READ_ONLY_DB_HOST"):
-#     REPLICA_DATABASES = []
-#     for i, host in enumerate(os.environ["READ_ONLY_DB_HOST"].split()):
-#         key = f"read-only-{i}"
-#         DATABASES[key] = DATABASES["default"].copy()
-#         DATABASES[key]["HOST"] = host
-#         REPLICA_DATABASES.append(key)
-#     DATABASE_ROUTERS = ["multidb.PinningReplicaRouter"]
-#     MIDDLEWARE.append("busstops.middleware.pin_db_middleware")
-#     READ_DATABASE = key
+if os.environ.get("READ_ONLY_DB_HOST"):
+    REPLICA_DATABASES = ["default"]
+    for i, host in enumerate(os.environ["READ_ONLY_DB_HOST"].split()):
+        key = f"read-only-{i}"
+        DATABASES[key] = DATABASES["default"].copy()
+        DATABASES[key]["HOST"] = host
+        REPLICA_DATABASES.append(key)
+    DATABASE_ROUTERS = ["multidb.PinningReplicaRouter"]
+    MIDDLEWARE.append("busstops.middleware.pin_db_middleware")
+    READ_DATABASE = key
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = None
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 2000
@@ -172,12 +183,15 @@ STORAGES = {
     },
 }
 WHITENOISE_ROOT = BASE_DIR / "busstops" / "static" / "root"
+WHITENOISE_MIMETYPES = {
+    ".webmanifest": "application/manifest+json",
+}
 TEMPLATE_MINIFER_STRIP_FUNCTION = "buses.utils.minify"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
         "OPTIONS": {
-            "debug": DEBUG or TEST,
+            "debug": DEBUG,
             "context_processors": [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
@@ -259,20 +273,23 @@ def traces_sampler(context):
     ):
         return 0
     if url.startswith("/stops/") or url.startswith("/services/"):
-        return 0.004
+        return 0.000005
     if url.startswith("/vehicles"):
-        return 0.0005
-    return 0.001
+        return 0.000001
+    return 0.000003
 
 
-if "SENTRY_DSN" in os.environ and not TEST:
-    sentry_sdk.init(
-        dsn=os.environ.get("SENTRY_DSN"),
-        integrations=[DjangoIntegration(), RedisIntegration(), HueyIntegration()],
-        ignore_errors=[KeyboardInterrupt, RuntimeError],
-        release=os.environ.get("COMMIT_HASH") or os.environ.get("KAMAL_CONTAINER_NAME"),
-    )
-    ignore_logger("django.security.DisallowedHost")
+if not TEST:  # pragma: nocover
+    if "SENTRY_DSN" in os.environ:
+        sentry_sdk.init(
+            dsn=os.environ.get("SENTRY_DSN"),
+            integrations=[DjangoIntegration(), RedisIntegration(), HueyIntegration()],
+            ignore_errors=[KeyboardInterrupt, RuntimeError],
+            release=os.environ.get("COMMIT_HASH")
+            or os.environ.get("KAMAL_CONTAINER_NAME"),
+            traces_sampler=traces_sampler,
+        )
+        ignore_logger("django.security.DisallowedHost")
 
     LOGGING = {
         "version": 1,
@@ -291,20 +308,6 @@ if "SENTRY_DSN" in os.environ and not TEST:
 TFL = {  # London
     "app_id": os.environ.get("TFL_APP_ID"),
     "app_key": os.environ.get("TFL_APP_KEY"),
-}
-TFWM_OPERATORS = {
-    # "National Express West Midlands",
-    # "National Express Coventry",
-    # "Diamond Bus",
-    # "Landflight",
-    # "West Midlands Metro",
-    # "Stagecoach Midlands",
-}
-ACIS_HORIZON_OPERATORS = {
-    "Ulsterbus",
-    "Ulsterbus Town Services",
-    "Translink Metro",
-    "Translink Glider",
 }
 TFE_OPERATORS = {
     "Lothian Buses",
@@ -330,8 +333,8 @@ else:
     DATA_DIR = BASE_DIR / "data"
 TNDS_DIR = DATA_DIR / "TNDS"
 
+# captchas
 TURNSTILE_SITEKEY = os.environ.get("TURNSTILE_SITEKEY", "0x4AAAAAAAFWiyCqdh2c-5sy")
 TURNSTILE_SECRET = os.environ.get("TURNSTILE_SECRET")
 
-ABBREVIATE_HOURLY = False
-DISABLE_REGISTRATION = True
+ABBREVIATE_HOURLY = False  # we override this in some tests, that's all

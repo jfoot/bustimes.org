@@ -18,69 +18,6 @@ from .utils import get_calendars, get_descriptions, get_routes
 differ = Differ(charjunk=lambda _: True)
 
 
-def get_stop_usages(trips):
-    groupings = [[], []]
-
-    trips = trips.prefetch_related(
-        Prefetch(
-            "stoptime_set",
-            queryset=StopTime.objects.filter(stop__isnull=False).order_by(
-                "trip_id", "id"
-            ),
-        )
-    )
-
-    for trip in trips:
-        if trip.inbound:
-            grouping_id = 1
-        else:
-            grouping_id = 0
-        grouping = groupings[grouping_id]
-
-        stop_times = trip.stoptime_set.all()
-
-        old_rows = [stop_time.stop_id for stop_time in grouping]
-        new_rows = [stop_time.stop_id for stop_time in stop_times]
-        diff = differ.compare(old_rows, new_rows)
-
-        y = 0  # how many rows down we are
-
-        for stop_time in stop_times:
-            if y < len(old_rows):
-                existing_row = old_rows[y]
-            else:
-                existing_row = None
-
-            instruction = next(diff)
-
-            while instruction[0] in "-?":
-                if instruction[0] == "-":
-                    y += 1
-                    if y < len(old_rows):
-                        existing_row = old_rows[y]
-                    else:
-                        existing_row = None
-                instruction = next(diff)
-
-            assert instruction[2:] == stop_time.stop_id
-
-            if instruction[0] == "+":
-                if not existing_row:
-                    grouping.append(stop_time)
-                    old_rows.append(stop_time.stop_id)
-                else:
-                    grouping = grouping[:y] + [stop_time] + grouping[y:]
-                    old_rows = old_rows[:y] + [stop_time.stop_id] + old_rows[y:]
-            else:
-                assert instruction[2:] == existing_row
-
-            y += 1
-
-        groupings[grouping_id] = grouping
-
-    return groupings
-
-
 def compare_trips(rows, trip_ids, a, b):
     a_time = None
     b_time = None
@@ -137,13 +74,9 @@ class Timetable:
             self.calendars = None
             return
 
-        if not date and len(routes) > 1:
-            current_routes = get_routes(routes, from_date=self.today)
-            if len(current_routes) == 1:
-                # completely ignore expired routes
-                self.routes = self.current_routes = current_routes
-
         four_weeks_time = self.today + datetime.timedelta(days=28)
+
+        scotland = any(route.source.name == "S" for route in routes)
 
         self.calendars = list(
             Calendar.objects.filter(Exists("trip", filter=Q(route__in=self.routes)))
@@ -199,15 +132,45 @@ class Timetable:
                 else:
                     self.date = self.today
 
-            # consider revision numbers:
-            self.current_routes = get_routes(routes, when=self.date)
+        # consider revision numbers:
+        if self.date:
+            self.current_routes = get_routes(routes, self.date)
 
         if not self.calendar:
             if self.calendars:
                 calendar_ids = [calendar.id for calendar in self.calendars]
                 self.calendar_ids = list(
-                    get_calendars(self.date, calendar_ids).values_list("id", flat=True)
+                    get_calendars(
+                        self.date, calendar_ids, scotland=scotland
+                    ).values_list("id", flat=True)
                 )
+
+    def correct_directions(self, trips):
+        # for merged multi-operator routes: reverse the polarity if they disagree which direction is inbound/outbound
+        stops = {}  # stops by source and direction
+        for trip in trips:
+            if trip.route.source_id not in stops:
+                stops[trip.route.source_id] = {
+                    True: set(),  # inbound
+                    False: set(),  # outbound
+                }
+            stops[trip.route.source_id][trip.inbound].update(
+                stop.stop_id for stop in trip.times
+            )
+
+        if len(stops) == 2:
+            source_a, source_b = stops
+
+            if (
+                len(stops[source_a][True] & stops[source_b][False])
+                > len(stops[source_a][True] & stops[source_b][True])
+            ) and (
+                len(stops[source_a][False] & stops[source_b][True])
+                > len(stops[source_a][False] & stops[source_b][False])
+            ):
+                for trip in trips:
+                    if trip.route.source_id == source_a:
+                        trip.inbound = not trip.inbound
 
     def render(self):
         trips = Trip.objects.filter(route__in=self.current_routes)
@@ -241,28 +204,36 @@ class Timetable:
             self.date = None
             return
 
-        if len(self.current_routes) > 1 and self.has_operators:
-            # merged services: correct mismatched inbound/outbound direction
-            inbound_dests = {
-                trip.destination_id for trip in trips if trip.inbound is True
-            }
-            outbound_dests = {
-                trip.destination_id for trip in trips if trip.inbound is False
-            }
-
-            if not inbound_dests.isdisjoint(outbound_dests):
-                prev_operator = False
-                for trip in trips:
-                    if prev_operator is False:
-                        prev_operator = trip.operator_id
-                    elif trip.operator_id != prev_operator:
-                        trip.inbound = not trip.inbound
-
         routes = {route.id: route for route in self.current_routes}
 
         for trip in trips:
             trip.route = routes[trip.route_id]
 
+        if len(self.current_routes) > 1:
+            self.correct_directions(trips)
+
+        # FlixBus: try to work out direction (inbound/outbound) using shape or destination
+        source = self.current_routes and self.current_routes[0].source
+        if (
+            source
+            and source.name == "FlixBus"
+            and not any(trip.inbound for trip in trips)
+        ):
+            journey_patterns = set(trip.journey_pattern for trip in trips)
+            if len(journey_patterns) == 2:
+                inbound_pattern = journey_patterns.pop()
+                for trip in trips:
+                    if trip.journey_pattern == inbound_pattern:
+                        trip.inbound = True
+            else:
+                destinations = set(trip.destination_id for trip in trips)
+                if len(destinations) == 2:
+                    inbound_destination = destinations.pop()
+                    for trip in trips:
+                        if trip.destination_id == inbound_destination:
+                            trip.inbound = True
+
+        for trip in trips:
             # split inbound and outbound trips into lists
             if trip.inbound:
                 self.groupings[1].trips.append(trip)
@@ -318,19 +289,19 @@ class Timetable:
                 destination = self.origins_and_destinations[0][-1]
                 actual_origin = rows[0].stop.get_qualified_name()
                 actual_destination = rows[-1].stop.get_qualified_name()
-                if origin in actual_destination and origin not in actual_origin:
-                    if (
-                        destination in actual_origin
-                        and destination not in actual_destination
-                    ):
-                        self.origins_and_destinations = [
-                            tuple(reversed(pair))
-                            for pair in self.origins_and_destinations
-                        ]
-                        self.inbound_outbound_descriptions = [
-                            tuple(reversed(pair))
-                            for pair in self.inbound_outbound_descriptions
-                        ]
+                if (
+                    origin in actual_destination
+                    and origin not in actual_origin
+                    or destination in actual_origin
+                    and destination not in actual_destination
+                ):
+                    self.origins_and_destinations = [
+                        tuple(reversed(pair)) for pair in self.origins_and_destinations
+                    ]
+                    self.inbound_outbound_descriptions = [
+                        tuple(reversed(pair))
+                        for pair in self.inbound_outbound_descriptions
+                    ]
 
         return self
 
@@ -347,6 +318,7 @@ class Timetable:
         )
         stops = (
             StopTime.stop.field.related_model.objects.select_related("locality")
+            .order_by()
             .defer("latlong", "locality__latlong")
             .in_bulk(stop_codes)
         )
@@ -363,29 +335,16 @@ class Timetable:
             grouping.apply_stops(stops)
 
     @cached_property
-    def has_blocks(self) -> bool:
-        return self.any_trip_has("block")
-
-    @cached_property
-    def has_garages(self) -> bool:
-        return self.any_trip_has("garage_id")
-
-    @cached_property
-    def has_vehicle_types(self) -> bool:
-        return self.any_trip_has("vehicle_type_id")
-
-    @cached_property
-    def has_operators(self) -> bool:
-        if self.operators:
-            return len(self.operators) > 1
-
-    @cached_property
-    def has_ticket_machine_codes(self) -> bool:
-        return self.any_trip_has("ticket_machine_code")
-
-    @cached_property
-    def has_vehicle_journey_codes(self) -> bool:
-        return self.any_trip_has("vehicle_journey_code")
+    def has_multiple_operators(self) -> bool:
+        if self.operators and len(self.operators) > 1:
+            return True
+        prev_op = None
+        for grouping in self.groupings:
+            for trip in grouping.trips:
+                if trip.operator_id:
+                    if prev_op and prev_op != trip.operator_id:
+                        return True
+                    prev_op = trip.operator_id
 
     def get_calendar_options(self, calendar_id):
         all_days = set()
@@ -501,6 +460,8 @@ def abbreviate(grouping, i, in_a_row, difference):
             for row in grouping.rows:
                 row.times[j] = None
         return
+    if not settings.ABBREVIATE_HOURLY:
+        return
     if (
         in_a_row < 4
         and not settings.ABBREVIATE_HOURLY
@@ -563,6 +524,9 @@ class Grouping:
                 partses = [reversed(parts) for parts in partses]
             return "\n".join([" - ".join(parts) for parts in partses])
 
+        if headsigns := set(trip.headsign for trip in self.trips if trip.headsign):
+            return f"To {' or '.join(headsigns)}"
+
         if self.inbound:
             return "Inbound"
         return "Outbound"
@@ -570,7 +534,7 @@ class Grouping:
     def txt(self):
         width = max(len(str(row.stop)) for row in self.rows)
         return "\n".join(
-            f'{str(row.stop):<{width}}  {"  ".join(str(time) or "     " for time in row.times)}'
+            f"{str(row.stop):<{width}}  {'  '.join(str(time) or '     ' for time in row.times)}"
             for row in self.rows
         )
 
@@ -611,7 +575,7 @@ class Grouping:
         operators = {o.noc: o for o in self.parent.operators}
 
         for head in self.get_column_heads("operator_id"):
-            head.content = operators.get(head.content, "")
+            head.content = operators.get(head.content, head.content)
             yield head
 
     def get_column_heads(self, key):

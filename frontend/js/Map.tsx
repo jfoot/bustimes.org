@@ -1,19 +1,28 @@
+import { captureException } from "@sentry/react";
 import React, { memo, useEffect, createContext } from "react";
 import { createRoot } from "react-dom/client";
-// import { captureException } from "@sentry/react";
 
-import Map, {
+import MapGL, {
   NavigationControl,
   GeolocateControl,
   AttributionControl,
-  MapProps,
+  type MapProps,
   useControl,
   useMap,
+  Popup,
+  type LngLat,
+  type MapLayerMouseEvent,
+  type PopupEvent,
 } from "react-map-gl/maplibre";
 
-import stopMarker from "data-url:../stop-marker.png";
-import routeStopMarker from "data-url:../route-stop-marker.png";
 import arrow from "data-url:../history-arrow.png";
+import routeStopMarkerCircle from "data-url:../route-stop-marker-circle.png";
+import routeStopMarkerDarkCircle from "data-url:../route-stop-marker-dark-circle.png";
+import routeStopMarkerDark from "data-url:../route-stop-marker-dark.png";
+import routeStopMarker from "data-url:../route-stop-marker.png";
+import stopMarkerCircle from "data-url:../stop-marker-circle.png";
+import stopMarker from "data-url:../stop-marker.png";
+import osmBright from "url:../osm_bright.json";
 import type {
   Map as MapLibreMap,
   MapStyleImageMissingEvent,
@@ -21,17 +30,24 @@ import type {
 
 const imagesByName: { [imageName: string]: string } = {
   "stop-marker": stopMarker,
+  "stop-marker-circle": stopMarkerCircle,
   "route-stop-marker": routeStopMarker,
-  arrow: arrow,
+  "route-stop-marker-circle": routeStopMarkerCircle,
+  "route-stop-marker-dark": routeStopMarkerDark,
+  "route-stop-marker-dark-circle": routeStopMarkerDarkCircle,
+  "history-arrow": arrow,
 };
 
 const mapStyles: { [key: string]: string } = {
-  alidade_smooth: "Light",
-  alidade_smooth_dark: "Dark",
+  alidade_smooth: "Smooth",
+  alidade_smooth_dark: "Smooth dark",
+  // alidade_satellite: "Satellite",
   osm_bright: "Bright",
   // outdoors: "Outdoors",
-  // alidade_satellite: "Satellite",
-  // ordnance_survey: "Ordnance Survey",
+  // aws: "Traffic",
+  // aws_satellite: "Satellite",
+  os_light: "Ordnance Survey light",
+  os_dark: "Ordnance Survey night",
 };
 
 type StyleSwitcherProps = {
@@ -101,11 +117,11 @@ function MapChild({ onInit }: { onInit?: (map: MapLibreMap) => void }) {
         onInit(_map);
       }
 
-      const onStyleImageMissing = function (e: MapStyleImageMissingEvent) {
+      const onStyleImageMissing = (e: MapStyleImageMissingEvent) => {
         if (e.id in imagesByName) {
           const image = new Image();
           image.src = imagesByName[e.id];
-          image.onload = function () {
+          image.onload = () => {
             if (!map.hasImage(e.id)) {
               map.addImage(e.id, image, {
                 pixelRatio: 2,
@@ -129,13 +145,6 @@ function MapChild({ onInit }: { onInit?: (map: MapLibreMap) => void }) {
 export default function BusTimesMap(
   props: MapProps & {
     onMapInit?: (map: MapLibreMap) => void;
-    // workaround for wrong react-map-gl type definitions?
-    minPitch?: number;
-    maxPitch?: number;
-    scrollZoom?: boolean;
-    touchZoomRotate?: boolean;
-    localIdeographFontFamily?: string;
-    pitchWithRotate?: boolean;
   },
 ) {
   const darkModeQuery = window.matchMedia("(prefers-color-scheme: dark)");
@@ -187,35 +196,62 @@ export default function BusTimesMap(
     [darkModeQuery.matches],
   );
 
-  useEffect(() => {
-    document.body.classList.toggle("dark-mode", mapStyle.endsWith("_dark"));
-  }, [mapStyle]);
+  const [contextMenu, setContextMenu] = React.useState<LngLat>();
 
-  let mapStyleUrl;
-  if (mapStyle === "ordnance_survey") {
-    mapStyleUrl =
-      "https://api.os.uk/maps/vector/v1/vts/resources/styles?key=b45dBXyI0RA7DGx5hcftaqVk5GFBUCEY&srs=3857";
-  } else {
-    mapStyleUrl = `https://tiles.stadiamaps.com/styles/${mapStyle}.json`;
+  const onContextMenu = (e: MapLayerMouseEvent | PopupEvent) => {
+    if ("lngLat" in e) {
+      setContextMenu(e.lngLat);
+    } else {
+      setContextMenu(undefined);
+    }
+  };
+
+  useEffect(() => {
+    document.body.classList.toggle(
+      "dark-mode",
+      mapStyle.endsWith("_dark") ||
+        (mapStyle.endsWith("_satellite") && darkModeQuery.matches),
+    );
+  }, [mapStyle, darkModeQuery.matches]);
+
+  let mapStyleURL = `https://tiles.stadiamaps.com/styles/${mapStyle}.json`;
+  if (mapStyle === "os_light") {
+    mapStyleURL = "https://tiles.bustimes.org.uk/styles/light/style.json";
+  } else if (mapStyle === "os_dark") {
+    mapStyleURL = "https://tiles.bustimes.org.uk/styles/night/style.json";
+  } else if (mapStyle === "osm_bright") {
+    mapStyleURL = osmBright;
+    // } else if (mapStyle === "aws" || mapStyle === "aws_satellite") {
+    //   const region = "eu-west-1";
+    //   let style = "Standard";
+    //   let traffic = "&traffic=All";
+    //   if (mapStyle === "aws_satellite") {
+    //     style = "Hybrid";
+    //     traffic = "";
+    //   }
+    //   // const colorScheme = "Light";
+    //   const apiKey =
+    //     "v1.public.eyJqdGkiOiIzN2Q2N2JhYi05NTYyLTRlOGItYjQ4Zi1iMDE4OTk3ZTExODUifX12J0dnJVXJbfadbzrJW3oeYvqHGJxm0iSO2aUyyDSZVER5A7gOTdKF5-iQxaqDcRIkJTZ4rIxdGqXVLG-MkDWi8n8jWEkIBploD6QX0lEp-dtl4cd0lhfcXfBgar8kgJCaBPcjaglztZs_SXOVWIgQmlY5hSzVxBnoezvFxW2dk7BBzlRREHscAjP9Oyx_c3wUJReYAc4rA8JxXWYVyLbe9a-FgapbrgQkSTKbjPChPfesLZjTZek1FChtCNs4EDOg8RX_sCFSDPIXtG-cR8IBsCSmMTgA8pubXyJuhIRgy2VOfSuwBGK983sX8i4uujcpsv7IUZR_b7oj9MRV9Vk.ZGQzZDY2OGQtMWQxMy00ZTEwLWIyZGUtOGVjYzUzMjU3OGE4";
+    //   mapStyleURL = `https://maps.geo.${region}.amazonaws.com/v2/styles/${style}/descriptor?key=${apiKey}&color-scheme=Light${traffic}`;
   }
+
   return (
     <ThemeContext.Provider value={mapStyle}>
-      <Map
+      <MapGL
         {...props}
         reuseMaps
+        crossSourceCollisions={false}
         touchPitch={false}
         pitchWithRotate={false}
         dragRotate={false}
-        minZoom={6}
+        minZoom={4}
         maxZoom={18}
-        mapStyle={mapStyleUrl}
+        projection="globe"
+        mapStyle={mapStyleURL}
         RTLTextPlugin={""}
         attributionControl={false}
-        // onError={(e) => captureException(e.error)}
-
-        // workaround for wrong react-map-gl type definitions?
-        transformRequest={undefined}
-        maxTileCacheSize={undefined}
+        onError={(e) => captureException(e.error)}
+        onContextMenu={onContextMenu}
       >
         <NavigationControl showCompass={false} />
         <GeolocateControl trackUserLocation />
@@ -223,17 +259,31 @@ export default function BusTimesMap(
           style={mapStyle}
           onChange={handleMapStyleChange}
         />
-
-        {mapStyle === "ordnance_survey" ? (
-          <AttributionControl customAttribution="© Ordnance Survey" />
-        ) : (
-          <AttributionControl />
-        )}
-
+        <AttributionControl />
         <MapChild onInit={props.onMapInit} />
 
         {props.children}
-      </Map>
+        {contextMenu ? (
+          <Popup
+            longitude={contextMenu.lng}
+            latitude={contextMenu.lat}
+            onClose={onContextMenu}
+          >
+            <a
+              href={`https://www.openstreetmap.org/#map=15/${contextMenu.lat}/${contextMenu.lng}`}
+              rel="noopener noreferrer"
+            >
+              OpenStreetMap
+            </a>
+            <a
+              href={`https://www.google.com/maps/search/?api=1&query=${contextMenu.lat},${contextMenu.lng}`}
+              rel="noopener noreferrer"
+            >
+              Google Maps
+            </a>
+          </Popup>
+        ) : null}
+      </MapGL>
     </ThemeContext.Provider>
   );
 }

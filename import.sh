@@ -2,7 +2,7 @@
 
 # Usage:
 #
-#     poetry run ./import.sh username password
+#     ./import.sh username password
 #
 # Where 'username' and 'password' are your username and password for the
 # Traveline National Dataset FTP server
@@ -31,6 +31,7 @@ PASSWORD=$2
 
 ./manage.py nptg_new
 ./manage.py naptan_new
+./manage.py naptan_new "Irish NaPTAN"
 
 
 cd data/TNDS

@@ -1,6 +1,6 @@
 import io
 import logging
-import xml.etree.cElementTree as ET
+import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timezone
 from functools import cache
@@ -126,7 +126,7 @@ class Command(BaseCommand):
                 if element.tag[:31] == "{http://www.netex.org.uk/netex}":
                     element.tag = element.tag[31:]
         except ET.ParseError as e:
-            logger.error(e, exc_info=True)
+            logger.exception(e)
             return
 
         operators = element.findall(
@@ -571,14 +571,16 @@ class Command(BaseCommand):
             self.fare_products = {}
             self.fare_zones = get_existing_fare_zones(dataset)
 
-            if response.headers["Content-Type"] == "text/xml":
+            if (
+                content_type := response.headers["Content-Type"]
+            ) == "text/xml" or content_type == "application/xml":
                 # maybe not fully RFC 6266 compliant
                 filename = response.headers["Content-Disposition"].split("filename", 1)[
                     1
                 ][2:-1]
                 self.handle_file(dataset, response.raw, filename)
             else:
-                assert response.headers["Content-Type"] == "application/zip"
+                assert content_type == "application/zip"
                 try:
                     self.handle_archive(dataset, io.BytesIO(response.content))
                 except (KeyError, DataError):
@@ -601,7 +603,7 @@ class Command(BaseCommand):
             headers["if-modified-since"] = http_date(dataset.datetime.timestamp())
 
         response = self.session.get(download_url, headers=headers, stream=True)
-        assert response.ok
+        response.raise_for_status()
 
         if response.status_code == 304:
             return dataset

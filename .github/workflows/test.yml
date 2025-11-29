@@ -1,4 +1,4 @@
-name: bustimes.org
+name: Run tests
 
 on:
   push:
@@ -6,39 +6,56 @@ on:
 
 jobs:
   test-frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
 
-    steps:
-    - uses: actions/checkout@v4
+    permissions:
+      contents: read
 
-    - uses: actions/setup-node@v4
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: actions/setup-node@v6
       with:
         node-version: '20'
         cache: 'npm'
-    - run: npm install
+
+    - run: npm ci
     - run: npm run lint
     - run: npm test
     - run: npm run build
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v4.4.3
       with:
         name: dist
-        path: |
-          busstops/static
+        path: busstops/static
+        if-no-files-found: error
 
   test-backend:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    needs: test-frontend
+    container:
+      image: ghcr.io/jclgoodwin/bustimes.org/bustimes-base:3.14
+
+    permissions:
+      # Gives the action the necessary permissions for publishing new
+      # comments in pull requests.
+      pull-requests: write
+      # Gives the action the necessary permissions for pushing data to the
+      # python-coverage-comment-action branch, and for editing existing
+      # comments (to avoid publishing multiple comments in the same PR)
+      contents: write
 
     services:
       postgres:
-        image: postgis/postgis
+        image: postgis/postgis:18-3.6
+
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_INITDB_ARGS: "--no-sync"
         options: >-
-          --mount type=tmpfs,destination=/var/lib/postgresql/data
+          --mount type=tmpfs,destination=/var/lib/postgresql
           --health-cmd pg_isready
           --health-interval 10s
           --health-timeout 5s
@@ -47,44 +64,33 @@ jobs:
           - 5432:5432
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
-    - name: Install Geospatial libraries
-      # required by GeoDjango
-      # see https://docs.djangoproject.com/en/dev/ref/contrib/gis/install/geolibs/
-      run: |
-        sudo apt-get update && sudo apt-get install binutils libproj-dev gdal-bin
+    - uses: astral-sh/setup-uv@v7
 
-    - name: Install poetry
-      run: pipx install poetry
-
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-        cache: 'poetry'
-
-    - run: poetry install --with test
+    - run: uv sync --group test --frozen
 
     - run: rm -r busstops/static
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v5
       with:
         name: dist
         path: busstops/static
 
     - name: run tests
       env:
-        SECRET_KEY: gdffesgfxc1as9rsxgv4
-        DATABASE_URL: postgis://postgres:postgres@localhost/postgres
+        DATABASE_URL: postgis://postgres:postgres@postgres/postgres
+        SECRET_KEY: secret
       run: |
-        poetry run ./manage.py collectstatic --noinput && \
-        poetry run coverage run --concurrency=multiprocessing ./manage.py test --parallel 2
+        uv run ./manage.py collectstatic --noinput && \
+        uv run coverage run ./manage.py test --keepdb --durations 10
 
     - name: generate coverage report
-      run: poetry run coverage combine && poetry run coverage xml
+      run: |
+        # uv run coverage combine && \
+        uv run coverage html
 
-    - uses: codecov/codecov-action@v4
+    - name: Coverage comment
+      uses: py-cov-action/python-coverage-comment-action@v3
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        fail_ci_if_error: false
-        files: ./coverage.xml
+        GITHUB_TOKEN: ${{ github.token }}

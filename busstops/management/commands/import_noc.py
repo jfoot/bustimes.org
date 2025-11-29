@@ -121,7 +121,7 @@ class Command(BaseCommand):
         licences_by_number = Licence.objects.in_bulk(field_name="licence_number")
 
         with open(settings.BASE_DIR / "fixtures" / "operators.yaml") as open_file:
-            overrides = yaml.load(open_file, Loader=yaml.BaseLoader)
+            overrides = yaml.safe_load(open_file)
 
         operators_by_slug = {operator.slug: operator for operator in operators.values()}
 
@@ -168,16 +168,11 @@ class Command(BaseCommand):
                 url = url.removesuffix("#")
                 url = url.split("#")[-1]
 
-            twitter = public_name.findtext("Twitter").removeprefix("@")
-
             if noc in overrides:
                 override = overrides[noc]
 
                 if "url" in override:
                     url = override["url"]
-
-                if "twitter" in override:
-                    twitter = override["twitter"]
 
                 if "name" in override:
                     if override["name"] == name:
@@ -205,7 +200,6 @@ class Command(BaseCommand):
                 operators_by_slug[operator.slug or slug] = operator
 
                 operator.url = url
-                operator.twitter = twitter
 
                 operator_codes += get_operator_codes(
                     code_sources, noc, operator, noc_line
@@ -222,12 +216,10 @@ class Command(BaseCommand):
                 if (
                     name != operator.name
                     or url != operator.url
-                    or twitter != operator.twitter
                     or vehicle_mode != operator.vehicle_mode
                 ):
                     operator.name = name
                     operator.url = url
-                    operator.twitter = twitter
                     operator.vehicle_mode = vehicle_mode
                     to_update.append(operator)
 
@@ -249,7 +241,6 @@ class Command(BaseCommand):
             to_create,
             update_fields=(
                 "url",
-                "twitter",
                 "name",
                 "vehicle_mode",
                 "slug",
@@ -257,9 +248,7 @@ class Command(BaseCommand):
                 "vehicle_mode",
             ),
         )
-        Operator.objects.bulk_update(
-            to_update, ("url", "twitter", "name", "vehicle_mode")
-        )
+        Operator.objects.bulk_update(to_update, ("url", "name", "vehicle_mode"))
 
         OperatorCode.objects.bulk_create(operator_codes)
         Operator.licences.through.objects.bulk_create(operator_licences)

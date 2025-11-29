@@ -1,10 +1,8 @@
 import React, { lazy, Suspense } from "react";
-import { VehicleJourney } from "./JourneyMap";
+import type { VehicleJourney } from "./JourneyMap";
+import LoadingSorry from "./LoadingSorry";
 
 const JourneyMap = lazy(() => import("./JourneyMap"));
-
-const apiRoot = process.env.API_ROOT as string;
-let hasHistory = 0;
 
 export default function History() {
   const [journeyId, setJourneyId] = React.useState(() => {
@@ -17,12 +15,10 @@ export default function History() {
 
   const closeMap = React.useCallback(() => {
     if (journeyId) {
-      if (hasHistory === 1) {
+      if (window.history.state?.hasHistory === 1) {
         window.history.back();
-        hasHistory -= 1;
       } else {
         window.location.hash = "";
-        hasHistory = 0;
       }
     }
   }, [journeyId]);
@@ -32,8 +28,15 @@ export default function History() {
   React.useEffect(() => {
     function handleHashChange() {
       if (window.location.hash.indexOf("#journeys/") === 0) {
+        if (!journeyId || window.history.state?.hasHistory) {
+          window.history.replaceState(
+            {
+              hasHistory: (window.history.state?.hasHistory || 0) + 1,
+            },
+            "",
+          );
+        }
         setJourneyId(window.location.hash.slice(1));
-        hasHistory += 1;
       } else {
         setJourneyId("");
       }
@@ -63,13 +66,13 @@ export default function History() {
 
       setLoading(true);
 
-      let url = apiRoot;
+      let url = "/";
       if (window.SERVICE_ID) {
-        url += "services/" + window.SERVICE_ID + "/";
+        url += `services/${window.SERVICE_ID}/`;
       } else if (window.VEHICLE_ID) {
-        url += "vehicles/" + window.VEHICLE_ID + "/";
+        url += `vehicles/${window.VEHICLE_ID}/`;
       }
-      url += journeyId + ".json";
+      url += `${journeyId}.json`;
 
       fetch(url).then((response) => {
         if (response.ok) {
@@ -90,7 +93,7 @@ export default function History() {
   }
 
   const closeButton = (
-    <button onClick={closeMap} className="map-button">
+    <button type="button" onClick={closeMap} className="map-button">
       Close map
     </button>
   );
@@ -99,7 +102,7 @@ export default function History() {
     <React.Fragment>
       <div className="service-map">
         {closeButton}
-        <Suspense fallback={<div className="sorry">Loading…</div>}>
+        <Suspense fallback={<LoadingSorry />}>
           <JourneyMap journey={journey} loading={loading} />
         </Suspense>
       </div>

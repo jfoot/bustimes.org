@@ -1,17 +1,19 @@
-{% if vehicle.colours or vehicle.livery %}
-    <div class="livery" style="background:{{ vehicle.get_livery }}"></div>
-    {% if vehicle.livery %}{{ vehicle.livery }}{% endif %}
-{% endif %}
-
 {% if vehicle.notes %}
     <p>{{ vehicle.notes }}</p>
 {% endif %}
 
 <dl class="contact-details">
-    {% if vehicle.vehicle_type %}
+    {% if vehicle.colours or vehicle.livery %}
         <div>
-            <dt>Type</dt>
-            <dd>{{ vehicle.vehicle_type }}</dd>
+            <dt>Livery</dt>
+            <dd>
+        {% if vehicle.livery and perms.vehicles.change_livery %}
+            <a href="{% url 'admin:vehicles_livery_change' object.livery_id %}">
+        {% endif %}
+        <div class="livery" style="background:{{ vehicle.get_livery }}"></div>
+        {% if vehicle.livery and perms.vehicles.change_livery %}</a>{% endif %}
+        {% if vehicle.livery.show_name %}{{ vehicle.livery.name }}{% endif %}
+            </dd>
         </div>
     {% endif %}
 
@@ -19,6 +21,18 @@
         <div>
             <dt>Branding</dt>
             <dd>{{ vehicle.branding }}</dd>
+        </div>
+    {% endif %}
+
+    {% if vehicle.vehicle_type %}
+        <div>
+            <dt>Type</dt>
+            <dd>
+                {{ vehicle.vehicle_type }}
+                {% if vehicle.vehicle_type.fuel == "electric" %}
+                    ⚡
+                {% endif %}
+            </dd>
         </div>
     {% endif %}
 
@@ -46,28 +60,20 @@
     {% endif %}
 </dl>
 
-{% with vehicle.get_flickr_link as flickr_link %}
-{% if vehicle.is_editable or request.user.is_superuser or flickr_link %}
+{% with flickr_link=vehicle.get_flickr_link %}
     <ul class="horizontal">
         {% if vehicle.is_editable %}
             <li><a href="{{ vehicle.get_edit_url }}">Edit</a></li>
         {% endif %}
 
-        {% if pending_edits.exists %}
-            <li><a href="/vehicles/edits?vehicle={{ vehicle.id }}&status=pending">Pending edits</a></li>
-        {% endif %}
-
-        {% if revisions.exists %}
-            <li><a href="/vehicles/edits?vehicle={{ vehicle.id }}&status=approved">History</a></li>
-        {% endif %}
+        <li><a href="/vehicles/edits?vehicle={{ vehicle.id }}&status=approved">History</a></li>
 
         {% if flickr_link %}
             <li>{{ flickr_link }}</li>
         {% endif %}
 
-        {% if request.user.is_superuser %}
+        {% if perms.vehicles.change_vehicle %}
             <li><a href="{% url 'admin:vehicles_vehicle_change' vehicle.pk %}">✎</a></li>
         {% endif %}
     </ul>
-{% endif %}
 {% endwith %}

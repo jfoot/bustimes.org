@@ -4,7 +4,7 @@
 
 {% block canonical %}
     <link rel="canonical" href="https://bustimes.org/contact">
-{% endblock %}
+{% endblock canonical %}
 
 {% block bodyclass %}narrow{% endblock %}
 
@@ -27,14 +27,15 @@
     <details>
         <summary>Lost property 👜 🧸</summary>
 
-        <p>Sorry, I can’t help you find items you’ve left on a bus.
+        <p>I’m sorry I can’t help you find items you’ve left on a bus.
         Contact the company that operates your bus – they should be able to help.</p>
     </details>
 
     <details>
         <summary>Enquiry or complaint about a bus service</summary>
 
-        <p>Sorry, I can’t help you with these. Please contact the company that operates the bus service.</p>
+        <p>I’m sorry I can’t help you with these.
+        Please contact the company that operates the bus service.</p>
     </details>
 
     <details{% if form.is_bound or form.initial.message %} open{% endif %}>
@@ -55,4 +56,4 @@
 
 {% endif %}
 
-{% endblock %}
+{% endblock content %}

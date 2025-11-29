@@ -2,15 +2,16 @@
 
 {% block title %}Page not found – bustimes.org{% endblock %}
 
-{% block fuse %}{% endblock %}
-
 {% block bodyclass %}narrow{% endblock %}
 
 {% block breadcrumb %}{% endblock %}
 
 {% block content %}
 
-    <h1>Page not found</h1>
+    <h1 class="service-header">
+        <span class="names"><strong class="name is-short">404</strong></span>
+        <span class="description">Page not found</span>
+    </h1>
 
     {% if exception.args %}
         <p>{{ exception }}</p>
@@ -24,4 +25,4 @@
         <input type="submit" value="Search">
     </form>
 
-{% endblock %}
+{% endblock content %}

@@ -1,20 +1,19 @@
 import React from "react";
 
 import {
-  Source,
   Layer,
-  LayerProps,
-  MapLayerMouseEvent,
-  MapGeoJSONFeature,
+  type LayerProps,
+  type MapLayerMouseEvent,
+  Source,
 } from "react-map-gl/maplibre";
 
-import StopPopup, { Stop } from "./StopPopup";
+import BusTimesMap, { ThemeContext } from "./Map";
+import StopPopup, { type Stop } from "./StopPopup";
 import VehicleMarker, {
-  Vehicle,
+  type Vehicle,
   getClickedVehicleMarkerId,
 } from "./VehicleMarker";
 import VehiclePopup from "./VehiclePopup";
-import BusTimesMap, { ThemeContext } from "./Map";
 
 declare global {
   interface Window {
@@ -22,15 +21,20 @@ declare global {
   }
 }
 
-type ServiceMapMapProps = {
+export type ServiceMapMapProps = {
   vehicles?: Vehicle[];
-  geometry?: MapGeoJSONFeature;
-  stops?: MapGeoJSONFeature[];
+  serviceIds: Set<number>;
+  stopsAndGeometry: {
+    [serviceId: number]: {
+      stops?: GeoJSON.FeatureCollection;
+      geometry?: GeoJSON.MultiLineString;
+    };
+  };
 };
 
-function Geometry({ geometry }: { geometry: MapGeoJSONFeature }) {
+function Geometry({ geometry }: { geometry: GeoJSON.MultiLineString }) {
   const theme = React.useContext(ThemeContext);
-  const darkMode = theme === "alidade_smooth_dark";
+  const darkMode = theme.endsWith("_dark") || theme.endsWith("_satellite");
 
   const routeStyle: LayerProps = {
     type: "line",
@@ -47,13 +51,21 @@ function Geometry({ geometry }: { geometry: MapGeoJSONFeature }) {
   );
 }
 
-function Stops({ stops }: { stops?: MapGeoJSONFeature[] }) {
+function Stops({ stops }: { stops: GeoJSON.FeatureCollection }) {
+  const theme = React.useContext(ThemeContext);
+  const darkMode = theme.endsWith("_dark") || theme.endsWith("_satellite");
+
   const stopsStyle: LayerProps = {
     id: "stops",
     type: "symbol",
     layout: {
       "icon-rotate": ["+", 45, ["get", "bearing"]],
-      "icon-image": "route-stop-marker",
+      "icon-image": [
+        "case",
+        ["==", ["get", "bearing"], ["literal", null]],
+        darkMode ? "route-stop-marker-dark-circle" : "route-stop-marker-circle",
+        darkMode ? "route-stop-marker-dark" : "route-stop-marker",
+      ],
       "icon-allow-overlap": true,
       "icon-ignore-placement": true,
     },
@@ -70,8 +82,8 @@ function Stops({ stops }: { stops?: MapGeoJSONFeature[] }) {
 
 export default function ServiceMapMap({
   vehicles,
-  geometry,
-  stops,
+  stopsAndGeometry,
+  serviceIds,
 }: ServiceMapMapProps) {
   const [cursor, setCursor] = React.useState<string>();
 
@@ -94,7 +106,7 @@ export default function ServiceMapMap({
 
   const [clickedVehicleMarkerId, setClickedVehicleMarker] = React.useState<
     number | undefined
-  >(function () {
+  >(() => {
     if (vehicles && vehicles.length === 1) {
       return vehicles[0].id;
     }
@@ -114,6 +126,9 @@ export default function ServiceMapMap({
       if (e.features?.length) {
         for (const stop of e.features) {
           if (stop.properties.url !== clickedStop?.properties.url) {
+            if (typeof stop.properties.services === "string") {
+              stop.properties.services = JSON.parse(stop.properties.services);
+            }
             setClickedStop(stop as unknown as Stop);
           }
         }
@@ -126,6 +141,42 @@ export default function ServiceMapMap({
   );
   const clickedVehicle =
     clickedVehicleMarkerId && vehiclesById[clickedVehicleMarkerId];
+
+  const geometry = React.useMemo(() => {
+    return {
+      type: "MultiLineString" as const,
+      coordinates: Array.from(serviceIds).flatMap((serviceId) => {
+        return stopsAndGeometry[serviceId]?.geometry?.coordinates || [];
+      }),
+    };
+  }, [stopsAndGeometry, serviceIds]);
+
+  const stops = React.useMemo(() => {
+    const stops: Record<string, GeoJSON.Feature> = {};
+
+    for (const serviceId of Array.from(serviceIds)) {
+      const serviceStops = stopsAndGeometry[serviceId]?.stops;
+      if (serviceStops?.features) {
+        for (const stop of serviceStops.features) {
+          const key = stop.properties?.url;
+          if (stops[key]?.properties?.services && stop.properties?.services) {
+            stops[key].properties.services = Array.from(
+              new Set([
+                ...stops[key].properties.services,
+                ...stop.properties.services,
+              ]),
+            );
+          } else {
+            stops[key] = stop;
+          }
+        }
+      }
+    }
+    return {
+      type: "FeatureCollection" as const,
+      features: Object.values(stops),
+    };
+  }, [stopsAndGeometry, serviceIds]);
 
   return (
     <BusTimesMap
@@ -170,7 +221,7 @@ export default function ServiceMapMap({
         />
       ) : null}
 
-      {geometry && <Geometry geometry={geometry} />}
+      <Geometry geometry={geometry} />
 
       <Stops stops={stops} />
     </BusTimesMap>

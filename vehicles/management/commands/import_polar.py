@@ -14,7 +14,7 @@ class Command(ImportLiveVehiclesCommand):
         parser.add_argument("source_name", type=str)
 
     def handle(self, source_name, **options):
-        self.source_name = source_name
+        self.source_name = self.vehicle_code_scheme = source_name
         super().handle(**options)
 
     def do_source(self):
@@ -23,6 +23,22 @@ class Command(ImportLiveVehiclesCommand):
             self.operators = self.source.settings["operators"]
         else:
             self.operators = {}
+
+    @staticmethod
+    def get_vehicle_identity(item):
+        return item["properties"]["vehicle"]
+
+    @staticmethod
+    def get_journey_identity(item):
+        return (
+            item["properties"]["line"],
+            item["properties"]["direction"],
+            item["properties"].get("destination", ""),
+        )
+
+    @staticmethod
+    def get_item_identity(item):
+        return item["geometry"]["coordinates"]
 
     def get_items(self):
         return super().get_items()["features"]
@@ -50,10 +66,10 @@ class Command(ImportLiveVehiclesCommand):
         if not operator:
             return None, None
 
-        if operator == "MCGL" and (len(code) >= 7 or len(code) >= 5 and code.isdigit()):
-            # Borders Buses or First vehicles
-            print(code)
-            return None, None
+        # if operator == "MCGL" and (len(code) >= 7 or len(code) >= 5 and code.isdigit()):
+        #     # Borders Buses or First vehicles
+        #     print(code)
+        #     return None, None
 
         defaults = {"source": self.source, "operator_id": operator, "code": code}
 
@@ -66,7 +82,11 @@ class Command(ImportLiveVehiclesCommand):
         elif code.isdigit():
             defaults["fleet_code"] = code
 
-        condition = Q(operator__in=self.operators.values()) | Q(operator=operator)
+        condition = (
+            Q(operator__in=self.operators.values())
+            | Q(operator=operator)
+            | Q(source=self.source)
+        )
         vehicles = self.vehicles.filter(condition)
 
         vehicle = vehicles.filter(code__iexact=code).first()
@@ -85,7 +105,7 @@ class Command(ImportLiveVehiclesCommand):
     def get_journey(self, item, vehicle):
         journey = VehicleJourney(
             route_name=item["properties"]["line"],
-            direction=item["properties"]["direction"][:8],
+            direction=item["properties"]["direction"],
             destination=item["properties"].get("destination", ""),
         )
 
@@ -93,9 +113,11 @@ class Command(ImportLiveVehiclesCommand):
         if not operator:
             return journey
 
-        latest_journey = vehicle.latest_journey
-
-        if latest_journey and latest_journey.route_name == journey.route_name:
+        if (latest_journey := vehicle.latest_journey) and (
+            latest_journey.route_name,
+            latest_journey.direction,
+            latest_journey.destination,
+        ) == (journey.route_name, journey.direction, journey.destination):
             journey.service_id = latest_journey.service_id
         else:
             services = Service.objects.filter(

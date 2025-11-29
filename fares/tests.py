@@ -26,11 +26,13 @@ class FaresTest(TestCase):
     def test_bod_netex(self):
         path = Path(__file__).resolve().parent / "data"
 
-        with use_cassette(str(path / "bod_fares.yaml")):
-            with self.assertLogs("fares.management.commands.import_netex_fares") as cm:
-                call_command(
-                    "import_netex_fares", "XCpEBAoqPDfVdYRoUahb3F2nEZTJJCULXZCPo5x8"
-                )
+        with (
+            use_cassette(str(path / "bod_fares.yaml")),
+            self.assertLogs("fares.management.commands.import_netex_fares") as cm,
+        ):
+            call_command(
+                "import_netex_fares", "XCpEBAoqPDfVdYRoUahb3F2nEZTJJCULXZCPo5x8"
+            )
 
         self.assertEqual(
             cm.output,
@@ -67,7 +69,8 @@ class FaresTest(TestCase):
         url = tariff.source.get_absolute_url()
         response = self.client.get(url)
         self.assertContains(
-            response, "Wednesday 30 September 2020–Monday 30 September 2120"
+            response,
+            "Wednesday 30 September 2020\u2009\u2013\u2009Monday 30 September 2120",
         )
         response = self.client.get(
             f"{url}?origin={origin.id}&destination={destination.id}"

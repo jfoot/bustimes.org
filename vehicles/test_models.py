@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from .models import Livery, Operator, Vehicle
+from .models import Livery, Vehicle
 
 
 class VehicleModelTests(TestCase):
@@ -18,37 +18,22 @@ class VehicleModelTests(TestCase):
         vehicle.reg = "J122018"
         self.assertEqual(str(vehicle), "J122018")
 
-        vehicle.notes = "Spare ticket machine"
+        vehicle = Vehicle(code="RML2604")
+        self.assertIsNone(vehicle.get_flickr_url())
         self.assertEqual("", vehicle.get_flickr_link())
 
-        vehicle = Vehicle(code="RML2604")
-        self.assertIn("search/?text=RML2604&sort", vehicle.get_flickr_url())
-
-        vehicle.operator = Operator(name="Lynx")
-        self.assertIn("search/?text=Lynx%20RML2604&sort", vehicle.get_flickr_url())
-
-        vehicle.fleet_number = "11111"
-        self.assertIn("search/?text=Lynx%2011111&sort", vehicle.get_flickr_url())
-
-        vehicle.reg = "YN69GHA"
-        vehicle.operator.parent = "Stagecoach"
-        vehicle.fleet_number = "11111"
-
-        self.assertIn(
-            "search/?text=YN69GHA%20or%20%22YN69%20GHA%22%20or%20Stagecoach%2011111&sort",
-            vehicle.get_flickr_url(),
-        )
-
     def test_vehicle_validation(self):
-        vehicle = Vehicle(colours="ploop")
+        vehicle = Vehicle(
+            colours="transparent", reg="3990ME", slug="3990me", code="3990ME"
+        )
         with self.assertRaises(ValidationError):
-            vehicle.clean()
+            vehicle.full_clean()
 
         vehicle.colours = ""
-        vehicle.clean()
+        vehicle.full_clean()
 
     def test_livery(self):
-        livery = Livery(name="Go-Coach", published=False)
+        livery = Livery(name="Go-Coach", colour="#ffffff", published=False)
         livery.text_colour = "#c0c0c0"
         livery.stroke_colour = "#ffee99"
         self.assertEqual("Go-Coach", str(livery))
@@ -69,8 +54,11 @@ class VehicleModelTests(TestCase):
         self.assertEqual(
             livery.get_styles(),
             [
-                f""".livery-{livery.id} {{\n  background: linear-gradient(#fdee00 66%,#7d287d 66%);
-  color:#c0c0c0;fill:#c0c0c0;stroke:#ffee99\n}}\n"""
+                f""".livery-{livery.id}{{
+  background: linear-gradient(#fdee00 66%,#7d287d 66%);
+  color: #c0c0c0;
+  stroke: #ffee99
+}}\n"""
             ],
         )
 
@@ -78,10 +66,10 @@ class VehicleModelTests(TestCase):
         livery.angle = 45
         livery.save()
         self.assertEqual(
-            "linear-gradient(45deg,#7d287d 34%,#fdee00 34%)", livery.left_css
+            "linear-gradient(45deg,#7d287d 34%,#fdee00 34%)", livery.left_css.lower()
         )
         self.assertEqual(
-            "linear-gradient(315deg,#7d287d 34%,#fdee00 34%)", livery.right_css
+            "linear-gradient(315deg,#7d287d 34%,#fdee00 34%)", livery.right_css.lower()
         )
 
         livery.angle = None
@@ -89,7 +77,8 @@ class VehicleModelTests(TestCase):
 
         vehicle = Vehicle(livery=livery)
         self.assertEqual(
-            "linear-gradient(270deg,#7d287d 34%,#fdee00 34%)", vehicle.get_livery(179)
+            "linear-gradient(270deg,#7d287d 34%,#fdee00 34%)",
+            vehicle.get_livery(179).lower(),
         )
         self.assertIsNone(vehicle.get_text_colour())
 
@@ -97,52 +86,30 @@ class VehicleModelTests(TestCase):
         vehicle.livery.save()
         self.assertEqual("silver", vehicle.get_livery(200))
 
-        livery.css = "linear-gradient(45deg,#ed1b23 35%,#fff 35%,#fff 45%,#ed1b23 45%)"
-        livery.set_css()
-        self.assertEqual(
-            livery.left_css,
-            "linear-gradient(45deg,#ed1b23 35%,#fff 35%,#fff 45%,#ed1b23 45%)",
-        )
-        self.assertEqual(
-            livery.right_css,
-            "linear-gradient(315deg,#ed1b23 35%,#fff 35%,#fff 45%,#ed1b23 45%)",
-        )
-
     def test_livery_validation(self):
-        livery = Livery()
+        livery = Livery(name="test", colour="#ffffff", published=False)
 
-        livery.clean()  # should not raise an exception
+        livery.clean_fields()  # should not raise an exception
 
         livery.text_colour = "#c0c0c0"
         livery.stroke_colour = "#ff00a9"
         livery.right_css = "{"
-        with self.assertRaises(ValidationError) as cm:
-            livery.clean()
-        self.assertEqual(
-            cm.exception.args, ({"right_css": "Must not contain { or }"}, None, None)
-        )
+        with self.assertRaisesMessage(
+            ValidationError, "{'right_css': ['Must not contain { or }']}"
+        ):
+            livery.clean_fields()
 
         livery.right_css = ""
         livery.left_css = "url(("
-        with self.assertRaises(ValidationError) as cm:
-            livery.clean()
-        self.assertEqual(
-            cm.exception.args,
-            ({"left_css": "Must contain equal numbers of ( and )"}, None, None),
-        )
+        with self.assertRaisesMessage(
+            ValidationError, "{'left_css': ['Must contain equal numbers of ( and )']}"
+        ):
+            livery.clean_fields()
 
         livery.left_css = ""
-        livery.stroke_colour = "red"
-        with self.assertRaises(ValidationError) as cm:
-            livery.clean()
-        self.assertEqual(
-            cm.exception.args,
-            (
-                {
-                    "stroke_colour": "An HTML5 simple color must be a Unicode string "
-                    "seven characters long."
-                },
-                None,
-                None,
-            ),
-        )
+        livery.stroke_colour = "transparent"
+        with self.assertRaisesMessage(
+            ValidationError,
+            "{'stroke_colour': ['An HTML5 simple color must be a Unicode string seven characters long.', 'Ensure this value has at most 7 characters (it has 11).']}",
+        ):
+            livery.full_clean()

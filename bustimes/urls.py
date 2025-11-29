@@ -15,8 +15,11 @@ urlpatterns = [
     path("stops/<atco_code>/debug", views.stop_debug),
     path("vehicles/tfl/<reg>", views.tfl_vehicle, name="tfl_vehicle"),
     path("trips/<int:pk>", views.TripDetailView.as_view(), name="trip_detail"),
-    path("trips/<int:pk>/block", views.trip_block),
-    path("garages.csv", views.garages),
-    path("garages/<int:pk>/trips.csv", views.garage_trips),
+    path("trips/<int:pk>/block", views.trip_block, name="block_detail"),
     path("trip_updates", views.trip_updates),
+    path(
+        "routelinks/<int:pk>",
+        views.route_link_view,
+        name="routelink_detail",
+    ),
 ]

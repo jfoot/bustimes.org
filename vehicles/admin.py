@@ -1,14 +1,15 @@
-from django import forms
+from django.forms import ModelForm, Textarea, TextInput
 from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError
 from django.db.models import Exists, OuterRef, Q
+from django.db import IntegrityError
 from django.urls import reverse
 from django.utils.html import format_html
 from simple_history.admin import SimpleHistoryAdmin
 from sql_util.utils import SubqueryCount
 
 from . import models
+from bustimes.admin import log_change
 
 UserModel = get_user_model()
 
@@ -44,15 +45,15 @@ class VehicleTypeAdmin(admin.ModelAdmin):
         )
 
 
-class VehicleAdminForm(forms.ModelForm):
+class VehicleAdminForm(ModelForm):
     class Meta:
         widgets = {
-            "fleet_number": forms.TextInput(attrs={"style": "width: 4em"}),
-            "fleet_code": forms.TextInput(attrs={"style": "width: 4em"}),
-            "reg": forms.TextInput(attrs={"style": "width: 8em"}),
-            "operator": forms.TextInput(attrs={"style": "width: 4em"}),
-            "branding": forms.TextInput(attrs={"style": "width: 8em"}),
-            "name": forms.TextInput(attrs={"style": "width: 8em"}),
+            "fleet_number": TextInput(attrs={"style": "width: 4em"}),
+            "fleet_code": TextInput(attrs={"style": "width: 4em"}),
+            "reg": TextInput(attrs={"style": "width: 8em"}),
+            "operator": TextInput(attrs={"style": "width: 4em"}),
+            "branding": TextInput(attrs={"style": "width: 8em"}),
+            "name": TextInput(attrs={"style": "width: 8em"}),
         }
 
 
@@ -145,6 +146,7 @@ class VehicleAdmin(admin.ModelAdmin):
         "copy_type",
         "make_livery",
         "deduplicate",
+        "merge_all_selected",
         "spare_ticket_machine",
         "lock",
         "unlock",
@@ -176,34 +178,14 @@ class VehicleAdmin(admin.ModelAdmin):
         else:
             self.message_user(request, "Select a vehicle with colours and branding.")
 
-    def deduplicate(self, request, queryset):
-        for vehicle in queryset.order_by("id"):
-            if not vehicle.reg and not vehicle.fleet_code:
-                self.message_user(request, f"{vehicle} has no reg")
-                continue
-            try:
-                if vehicle.reg:
-                    duplicate = models.Vehicle.objects.get(
-                        id__lt=vehicle.id, reg__iexact=vehicle.reg
-                    )  # vehicle with lower id number we will keep
-                else:
-                    duplicate = models.Vehicle.objects.get(
-                        id__lt=vehicle.id,
-                        operator=vehicle.operator_id,
-                        fleet_code__iexact=vehicle.fleet_code,
-                    )  # vehicle with lower id number we will keep
-            except (
-                models.Vehicle.DoesNotExist,
-                models.Vehicle.MultipleObjectsReturned,
-            ) as e:
-                self.message_user(request, f"{vehicle} {e}")
-                continue
-            try:
-                vehicle.vehiclejourney_set.update(vehicle=duplicate)
-            except IntegrityError:
-                pass
+    def merge_all_selected(self, request, vehicles):
+        vehicle = vehicles[0]
+
+        for duplicate in vehicles[1:]:
+            vehicle.vehiclejourney_set.update(vehicle=duplicate)
             vehicle.vehiclecode_set.update(vehicle=duplicate)
             vehicle.vehiclerevision_set.update(vehicle=duplicate)
+
             if (
                 not duplicate.latest_journey_id
                 or vehicle.latest_journey_id
@@ -218,11 +200,51 @@ class VehicleAdmin(admin.ModelAdmin):
             duplicate.fleet_number = vehicle.fleet_number
             if duplicate.withdrawn and not vehicle.withdrawn:
                 duplicate.withdrawn = False
+            try:
+                models.VehicleCode.objects.create(
+                    vehicle=duplicate, scheme="slug", code=vehicle.slug
+                )
+            except IntegrityError:
+                pass
             vehicle.delete()
             duplicate.save(
                 update_fields=["code", "fleet_code", "fleet_number", "reg", "withdrawn"]
             )
-            self.message_user(request, f"{vehicle} deleted, merged with {duplicate}")
+            self.message_user(
+                request,
+                format_html(
+                    "{} deleted, merged with <a href='{}'>{}</a>",
+                    vehicle,
+                    duplicate.get_absolute_url(),
+                    duplicate,
+                ),
+            )
+
+    def deduplicate(self, request, queryset):
+        for vehicle in queryset.order_by("id"):
+            if not vehicle.reg and not vehicle.fleet_code:
+                self.message_user(request, f"{vehicle} has no reg")
+                continue
+            try:
+                if vehicle.reg:
+                    duplicate = models.Vehicle.objects.get(
+                        id__lt=vehicle.id,
+                        operator=vehicle.operator_id,
+                        reg__iexact=vehicle.reg,
+                    )  # vehicle with lower id number we will keep
+                else:
+                    duplicate = models.Vehicle.objects.get(
+                        id__lt=vehicle.id,
+                        operator=vehicle.operator_id,
+                        fleet_code__iexact=vehicle.fleet_code,
+                    )  # vehicle with lower id number we will keep
+            except (
+                models.Vehicle.DoesNotExist,
+                models.Vehicle.MultipleObjectsReturned,
+            ) as e:
+                self.message_user(request, f"{vehicle} {e}")
+                continue
+            self.merge_all_selected(request, (vehicle, duplicate))
 
     def spare_ticket_machine(self, request, queryset):
         queryset.update(
@@ -239,9 +261,11 @@ class VehicleAdmin(admin.ModelAdmin):
 
     def lock(self, request, queryset):
         queryset.update(locked=True)
+        log_change(request, queryset, ["locked"])
 
     def unlock(self, request, queryset):
         queryset.update(locked=False)
+        log_change(request, queryset, ["locked"])
 
     @admin.display(ordering="latest_journey__datetime")
     def last_seen(self, obj):
@@ -310,15 +334,13 @@ class VehicleJourneyAdmin(admin.ModelAdmin):
         return queryset
 
 
-class LiveryAdminForm(forms.ModelForm):
-    save_as = True
-
+class LiveryAdminForm(ModelForm):
     class Meta:
         widgets = {
-            "colours": forms.Textarea,
-            "css": forms.Textarea,
-            "left_css": forms.Textarea,
-            "right_css": forms.Textarea,
+            "colours": Textarea,
+            "css": Textarea,
+            "left_css": Textarea,
+            "right_css": Textarea,
         }
 
 
@@ -349,6 +371,7 @@ class LiveryAdmin(SimpleHistoryAdmin):
     form = LiveryAdminForm
     search_fields = ["name"]
     actions = ["merge"]
+    save_as = True
     list_display = [
         "id",
         "name",
@@ -361,11 +384,35 @@ class LiveryAdmin(SimpleHistoryAdmin):
     ]
     list_filter = [
         "published",
+        "show_name",
         "updated_at",
         ("vehicle__operator", admin.RelatedOnlyFieldListFilter),
     ]
-    readonly_fields = ["left", "right", "blob", "updated_at"]
     ordering = ["-id"]
+
+    readonly_fields = ["left", "right", "blob", "updated_at"]
+    # specify order:
+    fields = [
+        "name",
+        "show_name",
+        "colour",
+        "blob",
+        "colours",
+        "angle",
+        "horizontal",
+        "text_colour",
+        "white_text",
+        "stroke_colour",
+        "left_css",
+        "right_css",
+        "left",
+        "right",
+        "published",
+        "updated_at",
+    ]
+
+    class Media:
+        js = ["js/livery-admin.js"]
 
     def merge(self, request, queryset):
         queryset = queryset.order_by("id")
@@ -430,11 +477,6 @@ class RevisionChangeFilter(admin.SimpleListFilter):
         return queryset
 
 
-class VehicleEditVoteInline(admin.TabularInline):
-    model = models.VehicleEditVote
-    readonly_fields = ["by_user"]
-
-
 @admin.register(models.VehicleRevision)
 class VehicleRevisionAdmin(admin.ModelAdmin):
     raw_id_fields = [
@@ -448,6 +490,22 @@ class VehicleRevisionAdmin(admin.ModelAdmin):
         "user",
         "approved_by",
     ]
+
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_add_permission(self, request):
+        return request.user.is_superuser
+
+    def has_change_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser
+
     list_display = ["created_at", "vehicle", "__str__", user, "message"]
     actions = ["revert"]
     list_filter = [
@@ -456,7 +514,6 @@ class VehicleRevisionAdmin(admin.ModelAdmin):
         ("vehicle__operator", admin.RelatedOnlyFieldListFilter),
     ]
     list_select_related = ["from_operator", "to_operator", "vehicle", "user"]
-    inlines = [VehicleEditVoteInline]
 
     def revert(self, request, queryset):
         for revision in queryset.prefetch_related("vehicle"):
@@ -469,6 +526,11 @@ class VehicleCodeAdmin(admin.ModelAdmin):
     raw_id_fields = ["vehicle"]
     list_display = ["id", "scheme", "code", "vehicle"]
     list_filter = ["scheme"]
+
+
+@admin.register(models.SiriSubscription)
+class SiriSubscriptionAdmin(admin.ModelAdmin):
+    readonly_fields = ["uuid", "sample"]
 
 
 admin.site.register(models.VehicleFeature)

@@ -2,7 +2,11 @@
 
 {% block title %}Edit details – {{ vehicle }} – bustimes.org{% endblock %}
 
-{% block fuse %}{% endblock %}
+{% block head %}
+    {% if form and livery %}
+        <style>{% for css in livery.get_styles %}{{ css|safe }}{% endfor %}</style>
+    {% endif %}
+{% endblock head %}
 
 {% block bodyclass %}narrow{% endblock %}
 
@@ -18,27 +22,16 @@
         <p>Details updated, and recorded in <a href="/vehicles/edits?status=approved">the changelog for all to see</a>:</p>
     {% endif %}
 
-    <p>
-        {% include "vehicle_revision.html" %}
-    </p>
-
+    {% include "vehicle_revision_changes.html" %}
 
 {% else %}
 
-    <h1>Edit vehicle details</h1>
-
     {% if pending_edits %}
-        <div class="message">
-            <p>❗ There’s already a pending edit for this vehicle</p>
-
-            {% include 'vehicle_revisions.html' with revisions=pending_edits %}
-        </div>
+        <p class="message">❗ This vehicle has already been edited recently:</p>
+        {% include 'vehicle_revisions.html' with revisions=pending_edits %}
     {% endif %}
 
-    <p>Please <a href="/rules">read the guidelines</a> first</p>
-
-    <p>ID:<br>
-    <code>{{ vehicle.id }}</code> <button class="button" onclick="javascript:navigator.clipboard.writeText('{{ vehicle.id }}');this.blur()">Copy</button></p>
+    <h1>Edit vehicle details</h1>
 
     <p>
         Ticket machine code:<br>
@@ -53,17 +46,14 @@
             {{ form.as_p }}
         </div>
 
+        <script async src="https://imgbb.com/upload.js" data-auto-insert="viewer-links"></script>
+
         {% csrf_token %}
 
         <input type="submit" value="Save changes">
     </form>
 
     {{ form.media }}
-
-    {% if livery %}
-        <style>{% for css in livery.get_styles %}{{ css|safe }}{% endfor %}</style>
-    {% endif %}
-
 {% endif %}
 
 {% if previous %}
@@ -74,4 +64,4 @@
     <p class="next"><a href="{{ next.get_edit_url }}">{{ next }} &rarr;</a></p>
 {% endif %}
 
-{% endblock %}
+{% endblock content %}

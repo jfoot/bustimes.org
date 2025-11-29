@@ -1,23 +1,21 @@
 from datetime import datetime, timedelta
-from functools import cache
 from zoneinfo import ZoneInfo
 
 from google.protobuf import json_format
 from google.transit import gtfs_realtime_pb2
 
+from django.db.models import Q
+
 from busstops.models import DataSource
-from bustimes.models import Note, StopTime, Trip
+from bustimes.models import Trip
 
 from ...models import Vehicle, VehicleJourney
-from .import_gtfsr_ie import Command as BaseCommand
+from .import_gtfsr_ie import Command as GTFSRCommand
 
 
-class Command(BaseCommand):
+class Command(GTFSRCommand):
     source_name = "Ember"
-
-    @cache
-    def get_note(self, note_code, note_text):
-        return Note.objects.get_or_create(code=note_code or "", text=note_text[:255])[0]
+    vehicle_code_scheme = "Ember"
 
     def do_source(self):
         self.tzinfo = ZoneInfo("Europe/London")
@@ -27,76 +25,24 @@ class Command(BaseCommand):
 
     def get_items(self):
         response = self.session.get(self.url, timeout=10)
-        assert response.ok
+        response.raise_for_status()
 
         feed = gtfs_realtime_pb2.FeedMessage()
         feed.ParseFromString(response.content)
 
-        items = []
-        vehicle_codes = []
-
-        stop_notes = {}
-
-        # build list of vehicles that have moved
+        # the feed contains both vehicle positions and alerts (and possibly other entities)
         for item in feed.entity:
             if item.HasField("vehicle"):
-                key = item.vehicle.vehicle.id
-                value = (
-                    item.vehicle.trip.route_id,
-                    item.vehicle.trip.trip_id,
-                    item.vehicle.trip.start_date,
-                    item.vehicle.position.latitude,
-                    item.vehicle.position.longitude,
-                )
-                if self.previous_locations.get(key) != value:
-                    items.append(item)
-                    vehicle_codes.append(key)
-                    vehicle_codes.append(key.replace(" ", ""))
-                    self.previous_locations[key] = value
-            elif item.HasField("alert"):
-                note = self.get_note(
-                    item.alert.header_text.translation[0].text[:1],
-                    item.alert.description_text.translation[0].text,
-                )
-                if note in stop_notes:
-                    stop_notes[note].append(item.alert.informed_entity[0].stop_id)
-                else:
-                    stop_notes[note] = [item.alert.informed_entity[0].stop_id]
-
-        self.prefetch_vehicles(vehicle_codes)
-
-        for note in stop_notes:
-            stop_times = StopTime.objects.filter(
-                stop__in=stop_notes[note], trip__operator="EMBR"
-            )
-            trips = Trip.objects.filter(stoptime__in=stop_times, operator="EMBR")
-            note.stoptime_set.set(stop_times)
-            note.trip_set.set(trips)
-
-        return items
-
-    def prefetch_vehicles(self, vehicle_codes):
-        vehicles = self.vehicles.filter(operator="EMBR", code__in=vehicle_codes)
-        self.vehicle_cache = {vehicle.code: vehicle for vehicle in vehicles}
+                yield item
 
     def get_vehicle(self, item):
         vehicle_code = item.vehicle.vehicle.id
-        vehicle = self.vehicle_cache.get(vehicle_code)
+        reg = vehicle_code.replace(" ", "")
 
-        if not vehicle:
-            vehicle = self.vehicle_cache.get(vehicle_code.replace(" ", ""))
-            if vehicle:
-                vehicle.code = vehicle_code
-                vehicle.save(update_fields=["code"])
-                self.vehicle_cache[vehicle_code] = vehicle
-
-        if vehicle:
-            return vehicle, False  # not created
-
-        vehicle = Vehicle(code=vehicle_code, operator_id="EMBR", source=self.source)
-        vehicle.save()
-
-        return vehicle, True  # created
+        return Vehicle.objects.filter(Q(code=vehicle_code) | Q(code=reg)).get_or_create(
+            operator_id="EMBR",
+            defaults={"code": vehicle_code, "reg": reg},
+        )
 
     def get_journey(self, item, vehicle):
         journey = VehicleJourney(code=item.vehicle.trip.trip_id)
@@ -124,8 +70,7 @@ class Command(BaseCommand):
             journey.service = trip.route.service
 
             journey.route_name = journey.service.line_name
-            if trip.destination_id:
-                journey.destination = str(trip.destination.locality)
+            journey.destination = trip.headsign or ""
 
         vehicle.latest_journey_data = json_format.MessageToDict(item)
 

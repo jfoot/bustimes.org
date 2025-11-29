@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+from django.db.models import Q
 from django.contrib.gis.geos import GEOSGeometry
 
 from busstops.models import Service
@@ -10,67 +11,55 @@ from ..import_live_vehicles import ImportLiveVehiclesCommand
 
 
 class Command(ImportLiveVehiclesCommand):
-    operators = ("LOTH", "EDTR", "ECBU", "NELB")
-    source_name = "TfE"
+    operators = ("LOTH", "EDTR", "ECBU", "NELB", "ETOR")
+    source_name = vehicle_code_scheme = "TfE"
     wait = 39
     services = Service.objects.filter(operator__in=operators, current=True).defer(
         "geometry", "search_vector"
     )
-    previous_locations = {}
 
-    def get_datetime(self, item):
+    @staticmethod
+    def get_vehicle_identity(item):
+        return item["vehicle_id"]
+
+    @staticmethod
+    def get_journey_identity(item):
+        return (
+            item["service_name"],
+            item["journey_id"],
+            item["destination"],
+        )
+
+    @staticmethod
+    def get_item_identity(item):
+        return (
+            item["longitude"],
+            item["latitude"],
+        )
+
+    @staticmethod
+    def get_datetime(item):
         timestamp = item["last_gps_fix"]
         if item["source"] == "MyBusTracker" and item["last_gps_fix_secs"] > 3600:
             timestamp += 3600
         return datetime.fromtimestamp(timestamp, timezone.utc)
 
-    def prefetch_vehicles(self, vehicle_codes):
-        vehicles = self.vehicles.filter(source=self.source, code__in=vehicle_codes)
-        self.vehicle_cache = {vehicle.code: vehicle for vehicle in vehicles}
-
     def get_items(self):
-        items = []
-        vehicle_codes = []
-
-        # build list of vehicles that have moved
-        for item in super().get_items()["vehicles"]:
-            key = item["vehicle_id"].removeprefix("T")
-            value = (
-                item["service_name"],
-                item["journey_id"],
-                item["destination"],
-                item["longitude"],
-                item["latitude"],
-                item["heading"],
-            )
-            if self.previous_locations.get(key) != value:
-                items.append(item)
-                vehicle_codes.append(key)
-                self.previous_locations[key] = value
-
-        self.prefetch_vehicles(vehicle_codes)
-
-        return items
+        return super().get_items()["vehicles"]
 
     def get_vehicle(self, item):
+        # somewhere in the Atlantic Ocean where real buses don't go
         if item["longitude"] == -7.557172 and item["latitude"] == 49.7668:
             return None, None
 
         vehicle_code = item["vehicle_id"].removeprefix("T")
 
-        if vehicle_code in self.vehicle_cache:
-            return self.vehicle_cache[vehicle_code], False
-
-        vehicle = Vehicle(
-            operator_id="LOTH",
+        return Vehicle.objects.filter(
+            Q(operator__in=self.operators) | Q(source=self.source)
+        ).get_or_create(
+            {"source": self.source, "operator_id": self.operators[0]},
             code=vehicle_code,
-            source=self.source,
         )
-        if vehicle_code.isdigit():
-            vehicle.fleet_number = vehicle_code
-        vehicle.save()
-
-        return vehicle, True
 
     def get_journey(self, item, vehicle):
         journey = VehicleJourney(
@@ -82,32 +71,33 @@ class Command(ImportLiveVehiclesCommand):
         if not journey.route_name and vehicle.operator_id == "EDTR":
             journey.route_name = "T50"
 
-        latest = vehicle.latest_journey
+        if latest := vehicle.latest_journey:
+            time_since_latest = self.get_datetime(item) - latest.datetime
+
         if not journey.route_name:
-            if latest and self.get_datetime(item) - latest.datetime < timedelta(
-                hours=1
-            ):
+            if latest and time_since_latest < timedelta(hours=1):
                 return latest
-        elif latest and latest.route_name == journey.route_name:
+
+        if latest and latest.route_name == journey.route_name:
             if (
                 latest.code == journey.code
                 and latest.destination == journey.destination
+                or (latest.destination == "Not In Service" or latest.code == "")
+                and (journey.code == "" or journey.code == "Not In Service")
+                and time_since_latest < timedelta(hours=1)
             ):
                 return latest
-            journey.service_id = latest.service_id
-        else:
-            try:
-                journey.service = self.services.get(
-                    line_name__iexact=journey.route_name
-                )
-                if journey.service:
-                    operator = journey.service.operator.first()
-                    if not vehicle.operator_id or vehicle.operator_id != operator.noc:
-                        vehicle.operator = operator
-                        vehicle.save(update_fields=["operator"])
 
-            except (Service.DoesNotExist, Service.MultipleObjectsReturned) as e:
-                print(e, item["service_name"])
+        try:
+            journey.service = self.services.get(line_name__iexact=journey.route_name)
+            if journey.service:
+                operator = journey.service.operator.first()
+                if not vehicle.operator_id or vehicle.operator_id != operator.noc:
+                    vehicle.operator = operator
+                    vehicle.save(update_fields=["operator"])
+
+        except (Service.DoesNotExist, Service.MultipleObjectsReturned) as e:
+            print(e, item["service_name"])
 
         if journey.service_id and journey.code:
             try:

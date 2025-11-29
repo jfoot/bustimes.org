@@ -1,11 +1,21 @@
 from django.contrib.auth.models import AbstractUser, UserManager
 from django.db import models
 from django.urls import reverse
+from uuid import uuid4
 
 
 class CustomUserManager(UserManager):
     def get_by_natural_key(self, username):
         return self.get(email__iexact=username)
+
+
+class Invitation(models.Model):
+    uuid = models.UUIDField(default=uuid4)
+    expires_at = models.DateTimeField()
+    operators = models.ManyToManyField("busstops.Operator", blank=True)
+
+    def get_absolute_url(self):
+        return reverse("register") + f"?invite_code={self.uuid}"
 
 
 class OperatorUser(models.Model):
@@ -31,6 +41,6 @@ class User(AbstractUser):
         return reverse("user_detail", args=(self.id,))
 
     def __str__(self):
-        if "@" not in self.username:
+        if self.trusted is not False and "@" not in self.username:
             return f"{self.id}: {self.username}"
         return f"{self.id}"

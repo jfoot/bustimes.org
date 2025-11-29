@@ -2,9 +2,13 @@
 
 {% block title %}Map – bustimes.org{% endblock %}
 
+{% load static %}
+
 {% block head %}
     <meta property="og:title" content="Map – bustimes.org">
-{% endblock %}
+    <link rel="stylesheet" href="{% static 'dist/js/app.css' %}">
+    <link rel="stylesheet" media="print" href="/liveries.{{ liveries_css_version }}.css" onload="this.onload=null;this.removeAttribute('media')">
+{% endblock head %}
 
 {% block bodyclass %}no-scroll{% endblock %}
 
@@ -22,7 +26,7 @@
             <input type="submit" value="Search">
         </form>
     </header>
-{% endblock %}
+{% endblock header %}
 
 {% block breadcrumb %}{% endblock %}
 
@@ -30,9 +34,7 @@
     <div id="hugemap">
         <noscript class="sorry">Sorry, the map requires JavaScript. You can still use most of the rest of the website.</noscript>
     </div>
-{% endblock %}
-
-{% load static %}
+{% endblock content %}
 
 {% block footer %}
     <script>
@@ -46,16 +48,6 @@
         {% endif %}
             zoom: 5,
         };
-        OLD_JS = [
-            "{% static 'js/reqwest.min.js' %}",
-            "{% static 'dist/js/bigmap-classic.css' %}",
-            "{% static 'dist/js/bigmap-classic.js' %}"
-        ];
-        NEW_JS = [
-            "{% static 'dist/js/app.css' %}",
-            "{% static 'dist/js/app.js' %}",
-        ];
     </script>
-    <script src="{% static 'dist/js/bigmap.js' %}"></script>
-    <link rel="stylesheet" href="/liveries.{{ liveries_css_version }}.css">
-{% endblock %}
+    <script src="{% static 'dist/js/app.js' %}"></script>
+{% endblock footer %}

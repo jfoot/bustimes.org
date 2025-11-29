@@ -1,4 +1,4 @@
-from django import forms
+from django.forms import ModelForm, Textarea
 from django.contrib import admin
 from django.contrib.gis.admin import GISModelAdmin
 from django.contrib.postgres.aggregates import StringAgg
@@ -10,8 +10,8 @@ from django.urls import reverse
 from django.utils.html import format_html
 from sql_util.utils import SubqueryCount
 
+from bustimes.admin import log_change
 from bustimes.models import Route, RouteLink
-from vehicles.models import VehicleJourney
 
 from . import models
 
@@ -41,6 +41,7 @@ class StopPointAdmin(GISModelAdmin):
     ]
     list_select_related = ["locality", "admin_area"]
     list_filter = [
+        ("source", admin.RelatedOnlyFieldListFilter),
         "modified_at",
         "created_at",
         "active",
@@ -83,11 +84,11 @@ class OperatorCodeInline(admin.TabularInline):
     model = models.OperatorCode
 
 
-class OperatorAdminForm(forms.ModelForm):
+class OperatorAdminForm(ModelForm):
     class Meta:
         widgets = {
-            "address": forms.Textarea,
-            "twitter": forms.Textarea,
+            "address": Textarea,
+            "twitter": Textarea,
         }
 
 
@@ -144,7 +145,7 @@ class OperatorAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         queryset = super().get_queryset(request)
         if "changelist" in request.resolver_match.view_name:
-            return queryset.annotate(
+            queryset = queryset.annotate(
                 services=SubqueryCount("service", filter=Q(service__current=True)),
                 vehicles=SubqueryCount("vehicle"),
             ).prefetch_related("operatorcode_set")
@@ -330,7 +331,8 @@ class ServiceAdmin(GISModelAdmin):
         return super().get_search_results(request, queryset, search_term)
 
     def current_false(self, request, queryset):
-        result = queryset.update(current=False)
+        result = queryset.order_by().update(current=False)
+        log_change(request, queryset, ["current"])
         self.message_user(request, f"{result}")
 
     @transaction.atomic
@@ -513,13 +515,15 @@ class DataSourceAdmin(admin.ModelAdmin):
     search_fields = ("name", "url")
     list_display = (
         "name",
+        "description",
         "url",
         "sha1",
         "datetime",
         "settings",
         "routes",
         "services",
-        "journeys",
+        "source",
+        # "journeys",
     )
     list_filter = (
         ("route", admin.EmptyFieldListFilter),
@@ -532,10 +536,10 @@ class DataSourceAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         queryset = super().get_queryset(request)
         if "changelist" in request.resolver_match.view_name:
-            return queryset.annotate(
-                routes=SubqueryCount("route"),
+            queryset = queryset.annotate(
+                routes=SubqueryCount("route", filter=~Q(service=None)),
                 services=SubqueryCount("service", filter=Q(current=True)),
-                journeys=Exists(VehicleJourney.objects.filter(source=OuterRef("id"))),
+                # journeys=Exists(VehicleJourney.objects.filter(source=OuterRef("id"))),
             ).prefetch_related("operatorcode_set")
         return queryset
 
@@ -553,19 +557,20 @@ class DataSourceAdmin(admin.ModelAdmin):
             '<a href="{}?source__id__exact={}">{}</a>', url, obj.id, obj.services
         )
 
-    @admin.display(ordering="journeys")
-    def journeys(self, obj):
-        url = reverse("admin:vehicles_vehiclejourney_changelist")
-        return format_html(
-            '<a href="{}?source__id__exact={}">{}</a>', url, obj.id, obj.journeys
-        )
+    # @admin.display(ordering="journeys")
+    # def journeys(self, obj):
+    #     url = reverse("admin:vehicles_vehiclejourney_changelist")
+    #     return format_html(
+    #         '<a href="{}?source__id__exact={}">{}</a>', url, obj.id, obj.journeys
+    #     )
 
     def delete_routes(self, request, queryset):
-        result = Route.objects.filter(source__in=queryset).delete()
+        result = Route.objects.filter(source__in=queryset).update(service=None)
         self.message_user(request, result)
 
     def remove_datetimes(self, request, queryset):
         result = queryset.order_by().update(datetime=None, sha1="")
+        log_change(request, queryset, ["datetime", "sha1"])
         self.message_user(request, result)
 
 
@@ -576,7 +581,7 @@ class SIRISourceAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         queryset = super().get_queryset(request)
         if "changelist" in request.resolver_match.view_name:
-            return queryset.annotate(
+            queryset = queryset.annotate(
                 areas=StringAgg(
                     Cast("admin_areas__atco_code", output_field=CharField()), ", "
                 )
@@ -606,7 +611,7 @@ class PaymentMethodAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         queryset = super().get_queryset(request)
         if "changelist" in request.resolver_match.view_name:
-            return queryset.annotate(
+            queryset = queryset.annotate(
                 operators=StringAgg("operator", ", ", distinct=True)
             )
         return queryset

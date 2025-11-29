@@ -1,5 +1,6 @@
-import React, { ReactElement } from "react";
-import { Vehicle } from "./VehicleMarker";
+import React, { type ReactElement } from "react";
+import type { StopTime, VehicleJourney } from "./JourneyMap";
+import type { Vehicle } from "./VehicleMarker";
 
 export type TripTime = {
   id: number;
@@ -20,6 +21,7 @@ export type TripTime = {
   timing_status: string;
   pick_up?: boolean;
   set_down?: boolean;
+  call_condition?: string | null;
 };
 
 type Note = {
@@ -34,9 +36,9 @@ export type Trip = {
   block?: string;
   service?: {
     slug?: string;
-    id: number;
-    line_name: string;
-    mode: string;
+    id: number | null;
+    line_name?: string;
+    mode?: string;
   };
   operator?: {
     slug?: string;
@@ -73,7 +75,7 @@ function Row({
     }
   }, [stop, onMouseEnter]);
 
-  let className;
+  let className: string | undefined;
 
   let stopName: string | ReactElement = stop.stop.name;
   if (stop.stop.icon) {
@@ -88,10 +90,10 @@ function Row({
   }
 
   if (stop.timing_status && stop.timing_status !== "PTP") {
-    className = className ? className + " minor" : "minor";
+    className = className ? `${className} minor` : "minor";
   }
 
-  let rowSpan;
+  let rowSpan: number | undefined;
   if (
     aimedColumn &&
     stop.aimed_arrival_time &&
@@ -101,8 +103,8 @@ function Row({
     rowSpan = 2;
   }
 
-  let actual,
-    actualRowSpan = rowSpan;
+  let actual: string | null | ReactElement | undefined;
+  let actualRowSpan = rowSpan;
 
   actual = stop.expected_departure_time || stop.expected_arrival_time; // Irish live departures
 
@@ -112,18 +114,18 @@ function Row({
       if (vehicle.progress.progress > 0.1) {
         actualRowSpan = (actualRowSpan || 1) + 1;
       }
-    } else {
+    } else if (!vehicle?.progress || vehicle.progress.id > stop.id) {
       actual = stop.actual_departure_time; // vehicle history
     }
     if (actual) {
-      actual = new Date(actual).toTimeString().slice(0, 5);
+      actual = actual.slice(11, 16);
     }
   }
   if (actual) {
     actual = <td rowSpan={actualRowSpan}>{actual}</td>;
   }
 
-  let caveat;
+  let caveat: ReactElement | undefined;
   if (!first && !last) {
     if (stop.set_down === false) {
       if (stop.pick_up === false) {
@@ -136,18 +138,35 @@ function Row({
     }
   }
 
+  let aimed: ReactElement | null | string = null;
+  if (aimedColumn) {
+    aimed = stop.aimed_arrival_time || stop.aimed_departure_time;
+    if (stop.call_condition === "notStopping") {
+      aimed = (
+        <td>
+          <s>
+            {aimed}
+            {caveat}
+          </s>
+        </td>
+      );
+    } else {
+      aimed = (
+        <td>
+          {aimed}
+          {caveat}
+        </td>
+      );
+    }
+  }
+
   return (
     <React.Fragment>
       <tr className={className} onMouseEnter={handleMouseEnter}>
         <td className="stop-name" rowSpan={rowSpan}>
           {stopName}
         </td>
-        {aimedColumn ? (
-          <td>
-            {stop.aimed_arrival_time || stop.aimed_departure_time}
-            {caveat}
-          </td>
-        ) : null}
+        {aimed}
         {actual}
       </tr>
       {rowSpan ? (
@@ -158,6 +177,27 @@ function Row({
     </React.Fragment>
   );
 }
+
+export const tripFromJourney = (journey: VehicleJourney): Trip | undefined => {
+  if (journey.stops) {
+    return {
+      times: journey.stops.map((stop, i: number) => {
+        return {
+          id: stop.id,
+          stop: {
+            atco_code: stop.atco_code,
+            name: stop.name,
+            location: stop.coordinates || undefined,
+          },
+          timing_status: stop.minor ? "OTH" : "PTP",
+          aimed_arrival_time: stop.aimed_arrival_time,
+          aimed_departure_time: stop.aimed_departure_time,
+          actual_departure_time: stop.actual_departure_time,
+        };
+      }),
+    };
+  }
+};
 
 const TripTimetable = React.memo(function TripTimetable({
   trip,
@@ -211,7 +251,7 @@ const TripTimetable = React.memo(function TripTimetable({
       <table>
         <thead>
           <tr>
-            <th></th>
+            <th className="stop-name" />
             {aimedColumn ? <th>Sched&shy;uled</th> : null}
             {actualColumn ? <th>Actual</th> : null}
           </tr>
@@ -231,7 +271,9 @@ const TripTimetable = React.memo(function TripTimetable({
           ))}
         </tbody>
       </table>
-      {trip.notes?.map((note) => <p key={note.code}>{note.text}</p>)}
+      {trip.notes?.map((note) => (
+        <p key={note.code}>{note.text}</p>
+      ))}
     </React.Fragment>
   );
 });

@@ -10,29 +10,67 @@ from ...models import SiriSubscription
 
 
 class Command(BaseCommand):
-    def handle(self, *args, **options):
-        endpoint = "https://obst-s2s.tfw.vix-its.com"
-        requestor_ref = "TFW_Bustimes_VM"
+    def add_arguments(self, parser):
+        parser.add_argument("source_address", type=str)
+        parser.add_argument("consumer_address", type=str)
+        parser.add_argument("subscription_name", type=str)
+        parser.add_argument("terminate", type=str, nargs="?")
+
+    def handle(
+        self,
+        source_address,
+        consumer_address,
+        subscription_name,
+        terminate=None,
+        *args,
+        **options,
+    ):
+        subscription = SiriSubscription.objects.get(name=subscription_name)
+        assert subscription.producer_url
 
         now = datetime.now(timezone.utc)
-        stats = cache.get("tfw_status")
-        if stats:
-            if (now - stats[-1][0]) < timedelta(minutes=5):
-                return
+        if not terminate:
+            if stats := cache.get(subscription.get_status_key()):
+                if (now - stats[-1][0]) < timedelta(minutes=5):
+                    return
+            else:
+                print(f"no {subscription} history, subscribing")
+
+        if subscription.username and subscription.password:
+            auth = requests.auth.HTTPBasicAuth(subscription.username, subscription.password)
+        else:
+            auth = None
 
         session = requests.Session()
-        session.mount("https://", SourceAddressAdapter("10.16.0.7"))
+        if source_address:
+            session.mount("https://", SourceAddressAdapter(source_address))
 
-        consumer_address = (
-            f"http://139.59.197.131/siri/{SiriSubscription.objects.get().uuid}"
-        )
+        if terminate:
+            data = f"""<Siri xmlns="http://www.siri.org.uk/siri" version="1.3">
+    <TerminateSubscriptionRequest>
+        <RequestTimestamp>{now.isoformat()}</RequestTimestamp>
+        <RequestorRef>{subscription.requestor_ref}</RequestorRef>
+        <SubscriptionRef>{terminate}</SubscriptionRef>
+    </TerminateSubscriptionRequest>
+</Siri>"""
+            print(data)
+            res = session.post(
+                subscription.producer_url,
+                data=data,
+                headers={"content-type": "text/xml"},
+                auth=auth
+            )
+            print(res.text)
+            return
+
+        consumer_address = f"{consumer_address}/siri/{subscription.uuid}"
 
         initial_termination_time = now + timedelta(hours=20) - timedelta(minutes=6)
 
         data = f"""<Siri xmlns="http://www.siri.org.uk/siri" version="1.3">
     <SubscriptionRequest>
         <RequestTimestamp>{now.isoformat()}</RequestTimestamp>
-        <RequestorRef>{requestor_ref}</RequestorRef>
+        <RequestorRef>{subscription.requestor_ref}</RequestorRef>
         <ConsumerAddress>{consumer_address}</ConsumerAddress>
         <VehicleMonitoringSubscriptionRequest>
             <SubscriptionIdentifier>{uuid.uuid4()}</SubscriptionIdentifier>
@@ -50,7 +88,8 @@ class Command(BaseCommand):
 </Siri>"""
 
         session.post(
-            endpoint,
+            subscription.producer_url,
             data=data,
             headers={"content-type": "text/xml"},
+            auth=auth
         )
